@@ -479,6 +479,10 @@ def run_case(
             shutil.copy(instructions, run.work / name)
     server = _server(case, run, server_dir)
     argv = adapter.command(case, run, condition, server)
+    extra = adapter.extra.get("harness_args") or []
+    if extra:
+        # Before the prompt for Codex, whose prompt is the last positional.
+        argv = [*argv[:-1], *extra, argv[-1]] if adapter.name == "codex" else [*argv, *extra]
     started = time.monotonic()
     timed_out = False
     with run.transcript.open("w") as stdout, run.stderr.open("w") as stderr:
@@ -694,6 +698,12 @@ def main() -> int:
     )
     parser.add_argument("--label", default=None, help="Name for this run in reports.")
     parser.add_argument(
+        "--harness-arg",
+        action="append",
+        default=[],
+        help="Extra argument for the harness CLI (repeatable), e.g. -c model_reasoning_effort=medium.",
+    )
+    parser.add_argument(
         "--scratch",
         type=Path,
         # Not under /tmp: Codex refuses to install its helper binaries there.
@@ -742,6 +752,7 @@ def main() -> int:
         {
             "max_budget_usd": args.max_budget_usd,
             "codex_bypass_sandbox": args.codex_bypass_sandbox,
+            "harness_args": args.harness_arg,
         },
     )
 
