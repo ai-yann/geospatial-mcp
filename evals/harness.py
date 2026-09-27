@@ -20,9 +20,12 @@ harness's own tool use (shell, web) and cost.
     uv run python evals/harness.py --report evals/results/harness-*
 
 Conditions:
-  mcp      the harness plus this server -- what people actually run
-  builtin  the harness alone: its shell, file and web tools, no server
-  none     no tools at all, the bare model (claude-code and opencode only)
+  mcp       the harness plus this server -- what people actually run
+  mcp-only  this server's tools and nothing else: isolates tool descriptions
+  builtin   the harness alone: its shell, file and web tools, no server
+  none      no tools at all, the bare model
+
+Codex cannot switch its shell off, so it runs mcp and builtin only.
 """
 
 from __future__ import annotations
@@ -80,6 +83,9 @@ PROVIDER_KEYS = (
 )
 
 MCP_NAME = "geospatial"
+
+#: Conditions in which the server is attached, so tool selection is scored.
+WITH_SERVER = ("mcp", "mcp-only")
 
 #: Strings that show an agent reaching into this server's own code or checkout.
 SERVER_MARKERS = ("geospatial_mcp", "geospatial-mcp")
@@ -156,7 +162,7 @@ class Parsed:
 class Adapter:
     name = ""
     binary = ""
-    conditions: tuple[str, ...] = ("mcp", "builtin", "none")
+    conditions: tuple[str, ...] = ("mcp", "mcp-only", "builtin", "none")
 
     def __init__(self, binary: str | None, model: str | None, extra: dict[str, Any]):
         self.bin = binary or shutil.which(self.binary) or self.binary
@@ -193,12 +199,13 @@ class ClaudeCode(Adapter):
             argv += ["--model", self.model]
         if condition == "none":
             return [*argv, "--tools", ""]
-        allowed = list(self.BUILTIN)
-        if condition == "mcp":
+        builtin = condition != "mcp-only"
+        allowed = list(self.BUILTIN) if builtin else []
+        if condition in WITH_SERVER:
             config = {"mcpServers": {MCP_NAME: server}}
             argv += ["--mcp-config", json.dumps(config)]
             allowed.append(f"mcp__{MCP_NAME}")
-        return [*argv, "--tools", "default", "--allowedTools", *allowed]
+        return [*argv, "--tools", "default" if builtin else "", "--allowedTools", *allowed]
 
     def parse(self, run):
         parsed = Parsed()
@@ -309,12 +316,30 @@ class OpenCode(Adapter):
     name = "opencode"
     binary = "opencode"
 
+    BUILTIN = (
+        "bash",
+        "edit",
+        "write",
+        "read",
+        "grep",
+        "glob",
+        "list",
+        "patch",
+        "todowrite",
+        "todoread",
+        "webfetch",
+        "websearch",
+        "codesearch",
+        "task",
+        "skill",
+    )
+
     def command(self, case, run, condition, server):
         config: dict[str, Any] = {
             "$schema": "https://opencode.ai/config.json",
             "permission": {"edit": "allow", "bash": "allow", "webfetch": "allow"},
         }
-        if condition == "mcp":
+        if condition in WITH_SERVER:
             config["mcp"] = {
                 MCP_NAME: {
                     "type": "local",
@@ -325,6 +350,8 @@ class OpenCode(Adapter):
             }
         if condition == "none":
             config["tools"] = {"*": False}
+        elif condition == "mcp-only":
+            config["tools"] = dict.fromkeys(self.BUILTIN, False)
         # Outside the working directory, so the model never sees its own config.
         (run.root / "opencode.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
         argv = [self.bin, "run", case["prompt"], "--format", "json"]
@@ -427,6 +454,7 @@ def run_case(
     server_dir: Path,
     timeout_s: float,
     scratch_base: Path,
+    instructions: Path | None = None,
 ) -> dict[str, Any]:
     root = out / case["id"] / f"r{repeat}"
     if root.exists():
@@ -437,6 +465,10 @@ def run_case(
     repo = inside_git_repo(run.work)
     if repo:
         raise SystemExit(f"refusing to run an agent inside the repository at {repo}")
+    if instructions:
+        # Project instructions, where each harness looks for them.
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            shutil.copy(instructions, run.work / name)
     server = _server(case, run, server_dir)
     argv = adapter.command(case, run, condition, server)
     started = time.monotonic()
@@ -507,12 +539,12 @@ def score(
         "upstream_failures": len(upstream),
         "used_shell": any(t.lower() in {"bash", "command_execution"} for t in parsed.harness_tools),
         # Reaching into this server's code without the server is not doing the work.
-        "contaminated": condition != "mcp"
+        "contaminated": condition not in WITH_SERVER
         and any(marker in text for text in parsed.harness_inputs for marker in SERVER_MARKERS),
     }
 
     tools_ok: bool | None = None
-    if condition == "mcp":
+    if condition in WITH_SERVER:
         expected = set(case.get("expect_tools", []))
         optional = set(case.get("optional_tools", []))
         forbidden = set(case.get("forbid_tools", []))
@@ -633,9 +665,16 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--harness", choices=sorted(ADAPTERS))
-    parser.add_argument("--condition", choices=("mcp", "builtin", "none"), default="mcp")
+    parser.add_argument(
+        "--condition", choices=("mcp", "mcp-only", "builtin", "none"), default="mcp"
+    )
     parser.add_argument("--model", default=None, help="Model name, in the harness's own format.")
     parser.add_argument("--filter", default=None, help="Substring match on id, persona or axis.")
+    parser.add_argument(
+        "--prompt",
+        default=None,
+        help="Run one ad-hoc prompt instead of the library (unscored; keeps the evidence).",
+    )
     parser.add_argument("--repeat", type=int, default=1, help="Runs per case (default 1).")
     parser.add_argument("--timeout", type=float, default=600.0, help="Seconds per run.")
     parser.add_argument("--bin", default=None, help="Path to the harness executable.")
@@ -649,7 +688,8 @@ def main() -> int:
     parser.add_argument(
         "--scratch",
         type=Path,
-        default=Path(tempfile.gettempdir()) / "geospatial-evals",
+        # Not under /tmp: Codex refuses to install its helper binaries there.
+        default=Path.home() / ".cache" / "geospatial-evals",
         help="Where agents work. Must be outside any git repository.",
     )
     parser.add_argument("--out", type=Path, default=None, help="Results directory.")
@@ -658,6 +698,17 @@ def main() -> int:
         "--codex-bypass-sandbox",
         action="store_true",
         help="For containers where Codex's own sandbox cannot start; the container is the sandbox.",
+    )
+    parser.add_argument(
+        "--instructions",
+        type=Path,
+        default=None,
+        help="A project instructions file, placed in the working dir as AGENTS.md and CLAUDE.md.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip runs already recorded in --out (for batches interrupted part-way).",
     )
     parser.add_argument(
         "--report", nargs="+", type=Path, default=None, help="Compare finished result dirs."
@@ -672,6 +723,11 @@ def main() -> int:
     adapter_cls = ADAPTERS[args.harness]
     if args.condition not in adapter_cls.conditions:
         parser.error(f"{args.harness} does not support --condition {args.condition}")
+    free = args.harness == "opencode" and (args.model or "").endswith("-free")
+    if free and args.condition in {"mcp-only", "none"}:
+        # Observed: with its own tools switched off, opencode's free tier answers
+        # 403 "can only be used from within OpenCode". Use a provider key instead.
+        parser.error(f"opencode's free models refuse --condition {args.condition}")
     adapter = adapter_cls(
         args.bin,
         args.model,
@@ -681,8 +737,20 @@ def main() -> int:
         },
     )
 
-    cases = load_cases(args.filter, include_network=True)
-    if args.condition != "mcp":
+    if args.prompt:
+        slug = "-".join(args.prompt.lower().split()[:5])
+        cases = [
+            {
+                "id": "adhoc-" + "".join(c for c in slug if c.isalnum() or c == "-"),
+                "persona": "adhoc",
+                "axis": "adhoc",
+                "prompt": args.prompt,
+                "max_turns": 10,
+            }
+        ]
+    else:
+        cases = load_cases(args.filter, include_network=True)
+    if args.condition not in WITH_SERVER and not args.prompt:
         # Without the server, only a checked answer or file can be scored.
         cases = [c for c in cases if c.get("answer") or c.get("artifacts")]
     if not cases:
@@ -699,9 +767,20 @@ def main() -> int:
     print(f"{len(cases)} case(s) x {args.repeat} in {label} -> {out}")
 
     records = []
+    done: set[tuple[str, int]] = set()
+    if args.resume and (out / "results.jsonl").is_file():
+        for line in (out / "results.jsonl").read_text(encoding="utf-8").splitlines():
+            record = json.loads(line)
+            records.append(record)
+            done.add((record["case_id"], record["repeat"]))
+        print(f"resuming: {len(done)} run(s) already recorded")
+    elif (out / "results.jsonl").is_file():
+        (out / "results.jsonl").unlink()
     with (out / "results.jsonl").open("a", encoding="utf-8") as sink:
         for case in cases:
             for k in range(1, args.repeat + 1):
+                if (case["id"], k) in done:
+                    continue
                 record = run_case(
                     adapter,
                     case,
@@ -711,6 +790,7 @@ def main() -> int:
                     args.server_dir.resolve(),
                     args.timeout,
                     args.scratch,
+                    args.instructions,
                 )
                 records.append(record)
                 sink.write(json.dumps(record) + "\n")
