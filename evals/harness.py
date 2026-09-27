@@ -74,6 +74,7 @@ PASSTHROUGH = (
 #: cloud credentials -- is forwarded, so a run can only spend what it was given.
 PROVIDER_KEYS = (
     "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",  # a Claude subscription, from `claude setup-token`
     "OPENAI_API_KEY",
     "CODEX_API_KEY",
     "OPENROUTER_API_KEY",
@@ -273,7 +274,14 @@ class Codex(Adapter):
         return [*argv, case["prompt"]]
 
     def env(self, run: RunPaths) -> dict[str, str]:
-        extra = {"CODEX_HOME": str(run.home / ".codex")}
+        # A ChatGPT sign-in (`codex login --device-auth`) lives in auth.json; copy it
+        # into the run's fresh CODEX_HOME. CODEX_AUTH_HOME says where to find it.
+        home = run.home / ".codex"
+        source = Path(os.environ.get("CODEX_AUTH_HOME") or Path.home() / ".codex") / "auth.json"
+        if source.is_file():
+            home.mkdir(parents=True, exist_ok=True)
+            shutil.copy(source, home / "auth.json")
+        extra = {"CODEX_HOME": str(home)}
         key = os.environ.get("CODEX_API_KEY") or os.environ.get("OPENAI_API_KEY")
         if key:
             extra["CODEX_API_KEY"] = key

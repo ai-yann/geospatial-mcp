@@ -193,6 +193,18 @@ class TestEnvironment:
         assert env["CODEX_API_KEY"] == "sk-test"
         assert env["HOME"] == str(run.home)
 
+    def test_a_subscription_login_is_carried_into_each_run(self, tmp_path, monkeypatch):
+        auth_home = tmp_path / "codex-auth"
+        auth_home.mkdir()
+        (auth_home / "auth.json").write_text("{}")
+        monkeypatch.setenv("CODEX_AUTH_HOME", str(auth_home))
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-test")
+        run = harness.RunPaths(tmp_path / "run")
+        run.create()
+        env = harness._environment(harness.Codex(None, None, {}), run)
+        assert (run.home / ".codex" / "auth.json").is_file()
+        assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "oauth-test"
+
     def test_claude_code_prompt_is_not_swallowed_by_a_variadic_flag(self, tmp_path):
         run = harness.RunPaths(tmp_path / "run")
         run.create()
