@@ -198,6 +198,8 @@ class ClaudeCode(Adapter):
         argv += ["--no-session-persistence", "--strict-mcp-config"]
         argv += ["--permission-mode", "dontAsk", "--max-turns", str(_turns(case))]
         argv += ["--max-budget-usd", str(self.extra.get("max_budget_usd", 1.0))]
+        # --tools "" leaves these in the catalogue, and Monitor runs shell commands.
+        argv += ["--disallowedTools", "Monitor", "PushNotification", "RemoteTrigger"]
         if self.model:
             argv += ["--model", self.model]
         if condition == "none":
