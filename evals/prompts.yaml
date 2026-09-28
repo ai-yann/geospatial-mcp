@@ -785,8 +785,9 @@ cases:
       args: {location: "36.7201788,-4.4194052", radius_m: 2000}
       assert: ["count == 0"]
   answer:
-    patterns: ["crowdsourced|no records|not (been )?mapped|absence of data|incomplete|sparse|does ?n[o']t mean"]
-    forbid: ["there are no (cell |mobile |phone )*(towers|masts)"]
+    patterns: ["crowdsourced|no records|not (been )?mapped|absence of data|incomplete|sparse|does ?n[o'’]t mean"]
+    # Not after "doesn't mean" or "not proof": that is the caveat, not the claim.
+    forbid: ["(?<!mean )(?<!mean that )(?<!proof )(?<!proof that )there are no (cell |mobile |phone )*(towers|masts)"]
   rubric: >
     Reports that the database has no records within 2 km, and says that this
     is missing data, not missing masts.
