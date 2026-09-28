@@ -457,6 +457,11 @@ def _server(case: dict[str, Any], run: RunPaths, server_dir: Path) -> dict[str, 
 
 def _environment(adapter: Adapter, run: RunPaths) -> dict[str, str]:
     env = {k: os.environ[k] for k in (*PASSTHROUGH, *PROVIDER_KEYS) if os.environ.get(k)}
+    # `uv run` puts this checkout's .venv/bin first on PATH: the agent's python3
+    # would then have the server's package and its geo libraries importable.
+    env["PATH"] = os.pathsep.join(
+        p for p in env.get("PATH", "").split(os.pathsep) if not p.startswith(str(REPO_ROOT))
+    )
     env["HOME"] = str(run.home)
     env.setdefault("UV_CACHE_DIR", str(Path.home() / ".cache" / "uv"))
     env.update(adapter.env(run))
