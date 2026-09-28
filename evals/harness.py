@@ -193,7 +193,9 @@ class ClaudeCode(Adapter):
         # The prompt goes straight after -p: a variadic option such as
         # --allowedTools would otherwise swallow it.
         argv = [self.bin, "-p", case["prompt"], "--output-format", "stream-json", "--verbose"]
-        argv += ["--no-session-persistence", "--bare", "--strict-mcp-config"]
+        # Not --bare: it ignores CLAUDE_CODE_OAUTH_TOKEN and skips CLAUDE.md, which
+        # --instructions relies on. The fresh HOME already isolates the run.
+        argv += ["--no-session-persistence", "--strict-mcp-config"]
         argv += ["--permission-mode", "dontAsk", "--max-turns", str(_turns(case))]
         argv += ["--max-budget-usd", str(self.extra.get("max_budget_usd", 1.0))]
         if self.model:
@@ -207,6 +209,14 @@ class ClaudeCode(Adapter):
             argv += ["--mcp-config", json.dumps(config)]
             allowed.append(f"mcp__{MCP_NAME}")
         return [*argv, "--tools", "default" if builtin else "", "--allowedTools", *allowed]
+
+    def env(self, run):
+        # Without --bare, a run with no key could fall back to this machine's login.
+        if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")):
+            raise SystemExit(
+                "set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY for Claude Code runs"
+            )
+        return {}
 
     def parse(self, run):
         parsed = Parsed()
