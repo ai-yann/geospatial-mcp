@@ -449,7 +449,9 @@ def _server(case: dict[str, Any], run: RunPaths, server_dir: Path) -> dict[str, 
     cache = os.environ.get("GEO_CACHE_DIR") or str(Path.home() / ".cache" / "geospatial-mcp")
     return {
         "command": "uv",
-        "args": ["run", "--directory", str(server_dir), "geospatial-mcp"],
+        # The module, not the console script: main renamed the command to
+        # mcp-geospatial, and the import name is the same on both sides.
+        "args": ["run", "--directory", str(server_dir), "python", "-m", "geospatial_mcp"],
         "env": {
             # Absolute: `uv run --directory` starts the server in server_dir, so a
             # relative path only lands in the run directory when server_dir is
