@@ -80,6 +80,20 @@ Tool calls are read from the server's own trace (`GEO_TRACE_FILE`), which
 records every call as the client sent it, before validation. It is the same
 for every harness, so no harness's log format decides a score.
 
+The runs in `results/` predate three changes to how `harness.py` starts things,
+made in October 2026:
+
+- The server is started as `uv run --directory <server-dir> python -m
+  geospatial_mcp`, not with the `geospatial-mcp` console script, so it works
+  whatever the command is called. The code that runs is the same.
+- `GEO_TRACE_FILE` is passed as an absolute path. A relative `--out` with
+  `--server-dir` used to write the trace under the server directory, so
+  `cc-ab-before-mcp` has no `trace.jsonl` and its tool calls were taken from
+  the harness's own transcript instead.
+- Codex's `-o` file is an absolute path. Codex used to resolve it against its
+  working directory and log "Failed to write last message file", and the final
+  answer was then taken from the last agent message instead.
+
 ## Scoring
 
 | Metric | Definition | Gate |
