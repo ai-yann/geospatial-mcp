@@ -81,9 +81,9 @@ def register(mcp: MCPServer) -> None:
                 description=(
                     "A position in any supported notation: decimal degrees "
                     "'48.8584,2.2945'; DMS '48°51'30\"N 2°17'40\"E'; USNG/MGRS "
-                    "'31UDQ4825211954'; geohash 'u09tunquc' (mark one with no digit: "
-                    "'geohash:gcpvj'); H3 '891fb46741bffff'; Plus Code '8FW4V75V+9R6'; "
-                    "or a place name to geocode."
+                    "'31UDQ4825211954'; geohash 'u09tunquc' (mark one that has no digit "
+                    "or has capitals: 'geohash:gcpvj'); H3 '891fb46741bffff'; Plus Code "
+                    "'8FW4V75V+9R6'; or a place name to geocode."
                 )
             ),
         ],
@@ -217,7 +217,7 @@ def register(mcp: MCPServer) -> None:
                 if parsed.kind == "grid"
                 else f"{parsed.latitude:.6f}, {parsed.longitude:.6f}"
             ),
-            meta=meta(offline=True),
+            meta=meta(offline=True, resolved=[parsed]),
         )
 
     # ------------------------------------------------------------------------
@@ -692,7 +692,7 @@ def _register_places(mcp: MCPServer) -> None:
                 description=(
                     "Position in any coordinate notation: decimal degrees, DMS, "
                     "a USNG/MGRS grid reference, geohash ('geohash:gcpvj' if it has "
-                    "no digit), H3 or Plus Code."
+                    "no digit or has capitals), H3 or Plus Code."
                 )
             ),
         ],
@@ -724,7 +724,7 @@ def _register_places(mcp: MCPServer) -> None:
             address=raw["address"],
             category=raw.get("category"),
             type=raw.get("type"),
-            meta=meta("nominatim", cached=cached),
+            meta=meta("nominatim", cached=cached, resolved=[loc]),
         )
 
     class Place(GeoModel):

@@ -268,7 +268,9 @@ self-host and set the corresponding `*_URL`. See
   once only when it is written like one, in lowercase with a digit among the
   letters. Anything else that could be a geohash is geocoded first, with a
   note in `meta.notes` giving the geohash reading, and is read as a geohash
-  only if no place has the name. Write `geohash:gcpvj` to skip the lookup.
+  only if no place has the name. Write `geohash:gcpvj` to skip the lookup. A
+  4-character geohash such as `sw19` could be a postcode district, so it is
+  decoded with a note saying so.
 - **Errors are errors.** Failures raise, so the MCP response is marked
   `isError`. A tool that returns `{"status": "error"}` is reported to the model
   as a success, and it will proceed on invented data.

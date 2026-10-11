@@ -42,6 +42,10 @@ _TIE_PROMINENCE = 0.05
 MENTION_PROMINENCE = 0.15
 _FAR_APART_M = 50_000.0
 _NAME_CHARS = 110
+#: An unmarked geohash this short names a cell about 39 km wide, and is spelt
+#: like a UK postcode district ("sw19", "ec1v"), so the reading is always noted.
+#: A marked one ("geohash:u33d") is longer than this, so it gets no note.
+_SHORT_GEOHASH_CHARS = 4
 
 #: A geometry argument as it can actually arrive over the wire.
 #:
@@ -101,6 +105,14 @@ def _reading_note(loc: Location) -> str | None:
             f"No place called {loc.raw!r} was found, so it was read as a geohash: "
             f"the cell centred on {lat:.5f}, {lon:.5f}. Write "
             f"'{GEOHASH_PREFIX}{loc.raw.lower()}' to skip the place-name lookup."
+        )
+    if loc.kind == "geohash" and len(loc.raw) <= _SHORT_GEOHASH_CHARS:
+        lat, lon = loc.as_tuple()
+        return (
+            f"Read {loc.raw!r} as a {len(loc.raw)}-character geohash, a cell about "
+            f"{(loc.precision_m or 0) / 1000:.0f} km wide centred on {lat:.5f}, {lon:.5f}. "
+            "If it is a postcode or another short code, add the town or country after "
+            "it so it is read as a place name, or pass coordinates."
         )
     return None
 
@@ -188,12 +200,14 @@ def resolve(location: str, *, what: str = "location", allow_geocode: bool = True
         # No place has the name, so the other reading is the one meant.
         return replace(as_geohash(parsed.raw), ambiguous_geohash=True)
     except GeoUpstreamError as exc:
-        if not parsed.ambiguous_geohash:
-            raise
-        raise GeoUpstreamError(
-            f"{exc} If {parsed.raw!r} is a geohash rather than a place name, "
-            f"write {marked!r} and no lookup is needed."
-        ) from exc
+        if parsed.ambiguous_geohash:
+            # Add the hint to the message but re-raise the same exception, so a
+            # GeoRateLimited keeps its type and retry_after_s.
+            exc.args = (
+                f"{exc} If {parsed.raw!r} is a geohash rather than a place name, "
+                f"write {marked!r} and no lookup is needed.",
+            )
+        raise
     best = results[0]
     rivals = far_alternatives(results, within=_TIE_PROMINENCE)
     if rivals:

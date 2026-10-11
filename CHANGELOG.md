@@ -86,7 +86,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Nominatim has no place called `gcpvj`, so it is still a cell in London. To
   skip the lookup, mark the geohash: `geohash:gcpvj`. `coord_describe`, which
   makes no network call, and the tools that take only coordinates treat such
-  a word as a place name too, and their messages give the marked form.
+  a word as a place name too, and their messages give the marked form; in
+  those tools a geohash in capitals, such as `U09TUNQUC`, needs the mark as
+  well. A postcode district in lowercase, such as `sw19`, still reads as a
+  geohash under this rule, so any unmarked 4-character geohash now comes
+  with a note giving its cell, about 39 km wide, and saying to add the town
+  or country if it is a postcode.
 
 ## [0.1.0]
 

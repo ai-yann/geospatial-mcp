@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from geospatial_mcp.errors import GeoInputError, GeoNoResults, GeoUpstreamError
+from geospatial_mcp.errors import GeoInputError, GeoNoResults, GeoRateLimited, GeoUpstreamError
 from geospatial_mcp.net.providers import nominatim
 from geospatial_mcp.tools._shared import (
     MENTION_PROMINENCE,
@@ -110,6 +110,16 @@ RANKINGS: dict[str, list[dict[str, Any]]] = {
         _match(
             "Denver, Bremer County, Iowa, 50622, United States", 42.67138, -92.33722, 0.459, "Iowa"
         ),
+        _match(
+            "Denver, Lancaster County, Pennsylvania, United States",
+            40.23315,
+            -76.13717,
+            0.409,
+            "Pennsylvania",
+        ),
+        _match(
+            "Denver, Miami County, Indiana, United States", 40.86387, -86.07750, 0.386, "Indiana"
+        ),
     ],
     "Bergen": [
         _match("Bergen, Vestland, Norge", 60.39431, 5.32592, 0.699, None, county="Vestland"),
@@ -123,6 +133,9 @@ RANKINGS: dict[str, list[dict[str, Any]]] = {
         _match(
             "Bergen County, New Jersey, United States", 40.96783, -74.05633, 0.561, "New Jersey"
         ),
+        # Two OSM objects 1.5 km apart for the one Dutch town.
+        _match("Bergen, Noord-Holland, Nederland", 52.66616, 4.68066, 0.490, "Noord-Holland"),
+        _match("Bergen, Noord-Holland, Nederland", 52.67023, 4.70116, 0.490, "Noord-Holland"),
     ],
     "Berne": [
         _match(
@@ -132,6 +145,10 @@ RANKINGS: dict[str, list[dict[str, Any]]] = {
             7.45217,
             0.720,
             "Bern/Berne",
+        ),
+        # The canton, 17 km from the city, so not a rival reading of the name.
+        _match(
+            "Bern/Berne, Schweiz/Suisse/Svizzera/Svizra", 46.83824, 7.60045, 0.667, "Bern/Berne"
         ),
         _match(
             "Berné, Pontivy, Morbihan, Bretagne, France métropolitaine, 56240, France",
@@ -149,6 +166,8 @@ RANKINGS: dict[str, list[dict[str, Any]]] = {
             0.678,
             "Andalucía",
         ),
+        # The province, 10 km from the city.
+        _match("Málaga, Andalucía, España", 36.79601, -4.54738, 0.597, "Andalucía"),
         _match(
             "Málaga, García Rovira, Santander, RAP Gran Santander, Colombia",
             6.69966,
@@ -303,6 +322,12 @@ class _UnreachableClient(_FakeClient):
         raise GeoUpstreamError(f"Could not reach {provider}: [Errno 8] nodename nor servname")
 
 
+class _RateLimitedClient(_FakeClient):
+    def get_json(self, url: str, *, params: dict[str, Any], provider: str, **_: Any):
+        self.requests.append(dict(params))
+        raise GeoRateLimited(provider, retry_after_s=30)
+
+
 class TestGeohashOrPlaceName:
     """A word that is also a valid geohash is looked up as a place first.
 
@@ -367,10 +392,15 @@ class TestGeohashOrPlaceName:
         with pytest.raises(GeoNoResults):
             resolve("Atlantis")
 
-    def test_a_coordinates_only_tool_says_how_to_mark_a_geohash(self, fake_nominatim):
+    @pytest.mark.parametrize(
+        ("text", "marked"),
+        [("gcpvj", "geohash:gcpvj"), ("U09TUNQUC", "geohash:u09tunquc")],
+    )
+    def test_a_coordinates_only_tool_says_how_to_mark_a_geohash(self, fake_nominatim, text, marked):
+        """No digit, or capitals: as the place_reverse description says."""
         with pytest.raises(GeoInputError) as exc:
-            resolve("gcpvj", what="point", allow_geocode=False)
-        assert "'geohash:gcpvj'" in str(exc.value)
+            resolve(text, what="point", allow_geocode=False)
+        assert repr(marked) in str(exc.value)
         assert fake_nominatim.requests == []
 
     def test_an_unreachable_geocoder_says_how_to_skip_it(self, monkeypatch):
@@ -383,6 +413,35 @@ class TestGeohashOrPlaceName:
         with pytest.raises(GeoUpstreamError) as plain:
             resolve("Berlin")
         assert "geohash" not in str(plain.value)
+
+    def test_a_rate_limit_keeps_its_type_and_its_wait(self, monkeypatch):
+        """The hint is added to the message; the exception itself is not replaced."""
+        monkeypatch.setattr(nominatim, "get_client", lambda: _RateLimitedClient())
+        with pytest.raises(GeoRateLimited) as exc:
+            resolve("gcpvj")
+        assert exc.value.retry_after_s == 30
+        assert "Retry after about 30s" in str(exc.value)
+        assert "'geohash:gcpvj'" in str(exc.value)
+
+    @pytest.mark.parametrize("text", ["sw19", "ec1v", "u33d"])
+    def test_a_4_character_geohash_is_decoded_with_a_note(self, fake_nominatim, text):
+        """Lowercase with a digit is a geohash, but "sw19" is also a postcode district.
+
+        It is still decoded, with no lookup, so the trade-off is stated instead.
+        """
+        loc = resolve(text)
+        assert loc.kind == "geohash"
+        assert not loc.ambiguous_geohash
+        assert fake_nominatim.requests == []
+        m = meta(offline=True, resolved=[loc])
+        assert m.offline
+        assert m.notes[0].startswith(f"Read {text!r} as a 4-character geohash")
+        assert "39 km wide" in m.notes[0]
+        assert "postcode" in m.notes[0]
+
+    @pytest.mark.parametrize("text", ["geohash:u33d", "ezs42", "u09tunquc"])
+    def test_a_marked_or_longer_geohash_gets_no_note(self, fake_nominatim, text):
+        assert meta(resolved=[resolve(text)]).notes == []
 
     async def test_coord_convert_geocodes_denver(self, fake_nominatim):
         async with mcp_client() as client:
@@ -418,3 +477,28 @@ class TestGeohashOrPlaceName:
         assert marked["is_valid"]
         assert marked["detected_format"] == "geohash"
         assert marked["implied_precision_m"] == 4890.0
+
+    async def test_coord_describe_notes_a_4_character_geohash(self, fake_nominatim):
+        async with mcp_client() as client:
+            result = await client.call_tool("coord_describe", {"value": "sw19"})
+        body = result.structured_content
+        assert body["is_valid"]
+        assert body["detected_format"] == "geohash"
+        assert body["implied_precision_m"] == 39100.0
+        assert body["meta"]["notes"][0].startswith("Read 'sw19' as a 4-character geohash")
+        assert fake_nominatim.requests == []
+
+    async def test_place_reverse_notes_a_4_character_geohash(self, monkeypatch):
+        asked: list[tuple[float, float]] = []
+
+        def fake_reverse(lat: float, lon: float, *, zoom: int = 18):
+            asked.append((lat, lon))
+            return {"display_name": "Somewhere off Crete", "address": {}}, False
+
+        monkeypatch.setattr(nominatim, "reverse", fake_reverse)
+        async with mcp_client() as client:
+            result = await client.call_tool("place_reverse", {"location": "sw19"})
+        assert not result.is_error
+        assert asked[0] == pytest.approx((34.01367, 24.78516), abs=1e-4)
+        notes = result.structured_content["meta"]["notes"]
+        assert notes[0].startswith("Read 'sw19' as a 4-character geohash")
