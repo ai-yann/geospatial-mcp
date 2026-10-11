@@ -216,3 +216,17 @@ class TestEnvironment:
 
     def test_codex_refuses_the_none_condition(self):
         assert "none" not in harness.Codex.conditions
+
+    def test_codex_final_message_path_survives_its_change_of_directory(self, tmp_path, monkeypatch):
+        """Codex resolves -o against -C, so a relative --out wrote nowhere."""
+        monkeypatch.chdir(tmp_path)
+        run = harness.RunPaths(Path("results") / "case" / "r1", tmp_path / "scratch")
+        run.create()
+        argv = harness.Codex("codex", None, {}).command(
+            CASE, run, "mcp", {"command": "uv", "args": [], "env": {}}
+        )
+        final = Path(argv[argv.index("-o") + 1])
+        assert final.is_absolute()
+        assert final.resolve() == (tmp_path / "results" / "case" / "r1" / "final.txt").resolve()
+        assert argv[-1] == CASE["prompt"]
+        assert "required" not in (run.home / ".codex" / "config.toml").read_text()

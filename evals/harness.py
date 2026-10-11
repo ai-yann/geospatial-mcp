@@ -278,7 +278,9 @@ class Codex(Adapter):
             ]
         (home / "config.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
         argv = [self.bin, "exec", "--json", "--skip-git-repo-check", "--ephemeral"]
-        argv += ["-C", str(run.work), "-o", str(run.final)]
+        # Codex resolves -o against -C, and run-batch.sh passes a relative --out,
+        # so a relative path here sent "Failed to write last message file".
+        argv += ["-C", str(run.work), "-o", str(run.final.absolute())]
         if self.extra.get("codex_bypass_sandbox"):
             argv.append("--dangerously-bypass-approvals-and-sandbox")
         if self.model:
