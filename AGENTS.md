@@ -110,6 +110,11 @@ cross-referenced, or the catalogue exceeds its context budget.
 ## Gotchas
 
 - `mcp` 2.x renamed `FastMCP` to `MCPServer`; there is no `fastmcp` module.
+- From `mcp` 2.1 only a `ToolError`'s message reaches the model; any other
+  exception from a tool arrives as `Error executing tool <name>`. `GeoError`
+  subclasses `ToolError` for this reason, so raise a `Geo*Error`, never a bare
+  `ValueError`, for anything the model should read. `uv.lock` pins 2.0, which
+  shows every message, so only the `newest-sdk` CI job would notice.
 - `ToolAnnotations` fields are snake_case in Python, camelCase on the wire.
 - Response models are defined inside `register()`, so the tool modules must
   **not** use `from __future__ import annotations` — PEP 563 string annotations

@@ -12,7 +12,9 @@ import json
 
 import pytest
 
-from geospatial_mcp.errors import GeoInputError
+from geospatial_mcp import errors
+from geospatial_mcp._sdk import ToolError
+from geospatial_mcp.errors import GeoError, GeoInputError
 
 from ..conftest import mcp_client
 
@@ -109,6 +111,26 @@ class TestErrorConstruction:
         assert "10SGJ068" in message  # what was received
         assert "Odd digit count" in message  # why it is wrong
         assert "10S GJ 0683 4468" in message  # what a good value looks like
+
+    def test_every_error_is_a_tool_error_so_the_sdk_shows_its_message(self):
+        """From mcp 2.1 the SDK hides the text of any exception that is not a ToolError.
+
+        The model then reads only "Error executing tool <name>". The locked mcp
+        2.0 shows every exception's text, so the calls above pass there with or
+        without the base class; this test is what fails if it is lost.
+        """
+        geo_errors = [
+            value
+            for value in vars(errors).values()
+            if isinstance(value, type) and issubclass(value, GeoError)
+        ]
+        assert len(geo_errors) >= 7  # GeoError and its six subclasses
+        for error_class in geo_errors:
+            assert issubclass(error_class, ToolError), error_class.__name__
+
+    def test_input_errors_are_still_value_errors(self):
+        """Pydantic turns a ValueError raised in a validator into a validation error."""
+        assert issubclass(GeoInputError, ValueError)
 
 
 class TestUnknownTool:

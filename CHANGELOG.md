@@ -30,6 +30,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Error messages reach the model with every `mcp` 2.x. From `mcp` 2.1 the SDK
+  tells the model only `Error executing tool <name>` when a tool raises
+  anything other than a `ToolError`, so on a fresh install every input error,
+  including the one that explains a distance looks like degrees, lost its text.
+  `GeoError` now subclasses `ToolError`. `uv.lock` still pins 2.0.0, so a new CI
+  job runs the tests against the newest 2.x as well.
 - Install instructions, and the install commands in error messages about a
   missing extra, fetch the server from this repository. The PyPI package named
   `geospatial-mcp` is an unrelated project, so installing by that name ran

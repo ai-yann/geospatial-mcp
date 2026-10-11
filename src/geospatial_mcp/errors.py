@@ -9,16 +9,26 @@ reads the failure as a success and proceeds on made-up data. Raising sets
 ``is_error=True`` and puts the message in front of the model, which can then
 correct itself.
 
+Only if the exception is a ``ToolError``, though. From ``mcp`` 2.1 the SDK
+treats any other exception from a tool as a crash: the model is told only
+``Error executing tool <name>``, and the message stays in the server log. So
+:class:`GeoError` subclasses the SDK's ``ToolError``. Without that, every
+message below, each written to teach the model a fix, would reach it as that
+one generic line. ``tests/mcp/test_error_quality.py`` checks the base class.
+
 Two tiers:
 
 * :class:`GeoInputError` and its subclasses -- the model can plausibly recover.
   The message reaches the model, so it must say what was received, why that is
   wrong, and show a valid example.
 * :class:`GeoConfigError` -- operator misconfiguration the model cannot fix
-  (missing API key, bad base URL). Raised as ``MCPError`` so the host sees it.
+  (missing API key, bad base URL). The message still reaches the model, so it
+  can tell the user what the operator has to change.
 """
 
 from __future__ import annotations
+
+from ._sdk import ToolError
 
 __all__ = [
     "GeoConfigError",
@@ -43,8 +53,12 @@ def install_commands(extra: str) -> tuple[str, str]:
     return f"uvx --from {requirement} geospatial-mcp", f"pip install {requirement}"
 
 
-class GeoError(Exception):
-    """Base class for every error this package raises deliberately."""
+class GeoError(ToolError):
+    """Base class for every error this package raises deliberately.
+
+    A ``ToolError``, so the SDK passes the message to the model rather than
+    replacing it with a generic one. See the module docstring.
+    """
 
 
 class GeoInputError(GeoError, ValueError):
