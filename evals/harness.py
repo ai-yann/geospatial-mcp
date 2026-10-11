@@ -10,13 +10,18 @@ running the harness answers it.
 Every run gets a fresh working directory and HOME, and a whitelisted
 environment: only the variables in ``PASSTHROUGH`` and ``PROVIDER_KEYS``
 reach the harness, so no ambient credential in the calling shell is used by
-accident. Tool calls come from the server's own trace (``GEO_TRACE_FILE``),
-identical for every harness; the transcript supplies the final answer, the
-harness's own tool use (shell, web) and cost.
+accident. Both directories are made under the work root (``--work-root``):
+keep it outside your home folder, because Claude Code also reads the .claude/
+folder and CLAUDE.md of every directory above its working directory.
+
+Tool calls come from the server's own trace (``GEO_TRACE_FILE``), identical
+for every harness; the transcript supplies the final answer, the harness's
+own tool use (shell, web) and cost.
 
     uv run python evals/harness.py --harness opencode --model opencode/<model>
     uv run python evals/harness.py --harness claude-code --condition builtin --filter demo
     uv run python evals/harness.py --harness codex --model <model> --repeat 3
+    uv run python evals/harness.py --harness claude-code --work-root /Users/Shared/geospatial-evals
     uv run python evals/harness.py --report evals/results/harness-*
 
 Conditions:
@@ -38,6 +43,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -91,11 +97,33 @@ WITH_SERVER = ("mcp", "mcp-only")
 #: Strings that show an agent reaching into this server's own code or checkout.
 SERVER_MARKERS = ("geospatial_mcp", "geospatial-mcp", "mcp-geospatial")
 
+#: Where each run's working directory and HOME are made, unless --work-root or
+#: GEO_EVALS_WORK_ROOT says otherwise. Not under /tmp: Codex refuses to install
+#: its helper binaries there. It is inside the home folder, which a harness can
+#: see from below; see :func:`inherited_agent_config`.
+DEFAULT_WORK_ROOT = Path.home() / ".cache" / "geospatial-evals"
+
+#: The variable that moves the work root without a command-line flag.
+WORK_ROOT_ENV = "GEO_EVALS_WORK_ROOT"
+
+#: Agent configuration a harness may pick up from a directory above its own.
+#: Claude Code reads the CLAUDE.md and the .claude/ folder (skills, agents,
+#: commands) of every parent of its working directory, whatever HOME is set to.
+AGENT_CONFIG = (
+    ".claude",
+    "CLAUDE.md",
+    "CLAUDE.local.md",
+    "AGENTS.md",
+    ".opencode",
+    "opencode.json",
+)
+
 
 # ---------------------------------------------------------------- run layout
 @dataclass
 class RunPaths:
-    """Evidence lives under ``root``; the agent works under ``scratch``.
+    """Evidence lives under ``root``; the agent works under ``scratch``, a fresh
+    directory in the work root.
 
     The two are kept apart because an agent explores its working directory.
     Our first no-server runs did so from inside this repository: the harness
@@ -134,6 +162,46 @@ class RunPaths:
         self.root.mkdir(parents=True, exist_ok=True)
         for path in (self.work, self.home):
             path.mkdir(parents=True, exist_ok=True)
+
+
+def default_work_root(environ: Mapping[str, str] | None = None) -> Path:
+    """``GEO_EVALS_WORK_ROOT`` if it is set, otherwise :data:`DEFAULT_WORK_ROOT`."""
+    value = (os.environ if environ is None else environ).get(WORK_ROOT_ENV, "").strip()
+    return Path(value).expanduser() if value else DEFAULT_WORK_ROOT
+
+
+def inherited_agent_config(work_root: Path) -> list[Path]:
+    """Agent configuration in ``work_root`` or above it, which a run would inherit.
+
+    Every run's fresh HOME hides the user-level configuration, but not this.
+    All 108 Claude Code runs recorded in September 2026 worked under
+    ~/.cache/geospatial-evals, and every one listed the operator's personal
+    skills and agents from ~/.claude in its init event. A work root outside
+    the home folder, such as /Users/Shared/geospatial-evals, has none above it.
+    """
+    start = work_root.expanduser().absolute()
+    return [
+        parent / name
+        for parent in (start, *start.parents)
+        for name in AGENT_CONFIG
+        if (parent / name).exists()
+    ]
+
+
+def warn_about_inherited_config(work_root: Path) -> list[Path]:
+    """Say on stderr when runs under ``work_root`` would inherit agent configuration."""
+    found = inherited_agent_config(work_root)
+    if found:
+        listed = "\n".join(f"  {path}" for path in found)
+        print(
+            f"warning: runs under {work_root} can see agent configuration above them:\n"
+            f"{listed}\n"
+            "Claude Code loads the skills, agents and CLAUDE.md it finds there into every run. "
+            f"Use --work-root or {WORK_ROOT_ENV} to work outside the home folder, "
+            "e.g. /Users/Shared/geospatial-evals.",
+            file=sys.stderr,
+        )
+    return found
 
 
 def inside_git_repo(path: Path) -> Path | None:
@@ -194,7 +262,9 @@ class ClaudeCode(Adapter):
         # --allowedTools would otherwise swallow it.
         argv = [self.bin, "-p", case["prompt"], "--output-format", "stream-json", "--verbose"]
         # Not --bare: it ignores CLAUDE_CODE_OAUTH_TOKEN and skips CLAUDE.md, which
-        # --instructions relies on. The fresh HOME already isolates the run.
+        # --instructions relies on. The fresh HOME hides the user-level settings,
+        # but not the .claude/ and CLAUDE.md of the directories above the working
+        # directory: that takes a work root outside the home folder (--work-root).
         argv += ["--no-session-persistence", "--strict-mcp-config"]
         argv += ["--permission-mode", "dontAsk", "--max-turns", str(_turns(case))]
         argv += ["--max-budget-usd", str(self.extra.get("max_budget_usd", 1.0))]
@@ -485,14 +555,14 @@ def run_case(
     out: Path,
     server_dir: Path,
     timeout_s: float,
-    scratch_base: Path,
+    work_root: Path,
     instructions: Path | None = None,
 ) -> dict[str, Any]:
     root = out / case["id"] / f"r{repeat}"
     if root.exists():
         shutil.rmtree(root)
-    scratch_base.mkdir(parents=True, exist_ok=True)
-    run = RunPaths(root, Path(tempfile.mkdtemp(prefix="run-", dir=scratch_base)))
+    work_root.mkdir(parents=True, exist_ok=True)
+    run = RunPaths(root, Path(tempfile.mkdtemp(prefix="run-", dir=work_root)))
     run.create()
     repo = inside_git_repo(run.work)
     if repo:
@@ -696,7 +766,7 @@ def _cell(value: Any) -> str:
 
 
 # ----------------------------------------------------------------------- main
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -728,11 +798,17 @@ def main() -> int:
         help="Extra argument for the harness CLI (repeatable), e.g. -c model_reasoning_effort=medium.",
     )
     parser.add_argument(
-        "--scratch",
+        "--work-root",
+        "--scratch",  # its earlier name, kept so recorded commands still run
+        dest="work_root",
         type=Path,
-        # Not under /tmp: Codex refuses to install its helper binaries there.
-        default=Path.home() / ".cache" / "geospatial-evals",
-        help="Where agents work. Must be outside any git repository.",
+        default=default_work_root(),
+        help=(
+            f"Where each run's working directory and HOME are made (default: ${WORK_ROOT_ENV}, "
+            f"else {DEFAULT_WORK_ROOT}). Must be outside any git repository, and should be "
+            "outside the home folder: Claude Code loads the .claude/ and CLAUDE.md of every "
+            "directory above its working directory. E.g. /Users/Shared/geospatial-evals."
+        ),
     )
     parser.add_argument("--out", type=Path, default=None, help="Results directory.")
     parser.add_argument("--max-budget-usd", type=float, default=1.0, help="Claude Code, per run.")
@@ -755,6 +831,11 @@ def main() -> int:
     parser.add_argument(
         "--report", nargs="+", type=Path, default=None, help="Compare finished result dirs."
     )
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
     args = parser.parse_args()
 
     if args.report:
@@ -808,6 +889,8 @@ def main() -> int:
     out = args.out or RESULTS_DIR / f"harness-{time.strftime('%Y%m%d-%H%M%S')}-{label}"
     out.mkdir(parents=True, exist_ok=True)
     print(f"{len(cases)} case(s) x {args.repeat} in {label} -> {out}")
+    # Recorded with the results, so a reader can tell whether the runs could see it.
+    inherited = [str(path) for path in warn_about_inherited_config(args.work_root)]
 
     records = []
     done: set[tuple[str, int]] = set()
@@ -832,7 +915,7 @@ def main() -> int:
                     out,
                     args.server_dir.resolve(),
                     args.timeout,
-                    args.scratch,
+                    args.work_root,
                     args.instructions,
                 )
                 records.append(record)
@@ -853,7 +936,15 @@ def main() -> int:
 
     summary = summarise(records)
     (out / "summary.json").write_text(
-        json.dumps({"label": label, "args": _jsonable(vars(args)), "summary": summary}, indent=2),
+        json.dumps(
+            {
+                "label": label,
+                "args": _jsonable(vars(args)),
+                "inherited_agent_config": inherited,
+                "summary": summary,
+            },
+            indent=2,
+        ),
         encoding="utf-8",
     )
     print(json.dumps(summary, indent=2))

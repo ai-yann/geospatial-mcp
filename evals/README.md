@@ -23,7 +23,9 @@ the other two cannot: a model skipping this server to do the maths itself.
 
 ```bash
 # Real harnesses. Each run gets a fresh HOME and only whitelisted variables,
-# so no ambient credential is used by accident.
+# so no ambient credential is used by accident. Work outside your home folder
+# (see "Where runs work" below).
+export GEO_EVALS_WORK_ROOT=/Users/Shared/geospatial-evals
 uv run python evals/harness.py --harness opencode --model opencode/<model> --filter demo
 uv run python evals/harness.py --harness claude-code --condition builtin --repeat 3
 uv run python evals/harness.py --harness codex --model <model>
@@ -34,6 +36,26 @@ uv run python evals/run.py --mode validate --network  # include live-API cases
 uv run python evals/run.py --mode agent --model claude-sonnet-5
 uv run python evals/run.py --mode agent --filter telecom   # one persona
 ```
+
+## Where runs work
+
+Each run's working directory and HOME are made in a fresh directory under the
+work root. Set it with `--work-root` (formerly `--scratch`, which still works)
+or `GEO_EVALS_WORK_ROOT`. The default is `~/.cache/geospatial-evals`.
+
+Use a work root outside your home folder, such as
+`/Users/Shared/geospatial-evals` on macOS. Claude Code reads the `.claude/`
+folder and the `CLAUDE.md` of every directory above its working directory,
+whatever `HOME` is set to. With the default, it finds your own `~/.claude`,
+and every run gets your personal skills, agents and instructions. Those are
+not part of the setup being measured, and they differ from one machine to the
+next.
+
+The harness prints a warning when it finds `.claude`, `CLAUDE.md`,
+`CLAUDE.local.md`, `AGENTS.md`, `.opencode` or `opencode.json` in the work
+root or any directory above it. It also lists them in the results'
+`summary.json`, under `inherited_agent_config`. The work root must also be
+outside any git repository; the harness refuses to run inside one.
 
 ## Coverage axes
 
@@ -93,6 +115,13 @@ made in October 2026:
 - Codex's `-o` file is an absolute path. Codex used to resolve it against its
   working directory and log "Failed to write last message file", and the final
   answer was then taken from the last agent message instead.
+
+They also predate `--work-root`. All 108 Claude Code runs in `results/` (the
+`cc-*` directories) worked under `~/.cache/geospatial-evals`, and the init
+event of every one lists the operator's own skills and agents from
+`~/.claude`. Claude Code very probably loaded `~/.claude/CLAUDE.md` as
+instructions too, though the transcripts do not record which instruction
+files it read. Read those results with that in mind.
 
 ## Scoring
 

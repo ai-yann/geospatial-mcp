@@ -6,6 +6,7 @@ in ``fixtures/``, and scoring on hand-built traces, so these stay offline.
 
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -245,3 +246,92 @@ class TestEnvironment:
         server = harness._server(CASE, harness.RunPaths(tmp_path / "run"), tmp_path)
         assert server["command"] == "uv"
         assert server["args"][-3:] == ["python", "-m", "geospatial_mcp"]
+
+
+class _WhereAmI(harness.Adapter):
+    """A stand-in harness that reports where it was started, and with what HOME."""
+
+    name = "where-am-i"
+
+    def command(self, case, run, condition, server):
+        script = (
+            "import json, os; print(json.dumps({'cwd': os.getcwd(), 'home': os.environ['HOME']}))"
+        )
+        return [sys.executable, "-c", script]
+
+    def parse(self, run):
+        return harness.Parsed(final_text=run.transcript.read_text(encoding="utf-8").strip())
+
+
+class TestWorkRoot:
+    """Runs can be moved out of the home folder, whose .claude/ Claude Code reads.
+
+    All 108 Claude Code runs recorded in September worked under
+    ~/.cache/geospatial-evals and listed the operator's own skills and agents.
+    """
+
+    def test_the_default_is_unchanged(self, monkeypatch):
+        monkeypatch.delenv(harness.WORK_ROOT_ENV, raising=False)
+        args = harness.build_parser().parse_args(["--harness", "codex"])
+        assert args.work_root == Path.home() / ".cache" / "geospatial-evals"
+
+    def test_the_environment_variable_moves_it(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(harness.WORK_ROOT_ENV, str(tmp_path / "shared"))
+        args = harness.build_parser().parse_args(["--harness", "codex"])
+        assert args.work_root == tmp_path / "shared"
+
+    def test_the_flag_wins_over_the_variable(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(harness.WORK_ROOT_ENV, str(tmp_path / "from-env"))
+        args = harness.build_parser().parse_args(["--work-root", str(tmp_path / "from-flag")])
+        assert args.work_root == tmp_path / "from-flag"
+
+    def test_the_old_scratch_flag_still_works(self, tmp_path):
+        args = harness.build_parser().parse_args(["--scratch", str(tmp_path / "old")])
+        assert args.work_root == tmp_path / "old"
+
+    def test_the_agent_starts_inside_the_work_root(self, tmp_path):
+        work_root = tmp_path / "shared" / "geospatial-evals"
+        record = harness.run_case(
+            _WhereAmI(None, None, {}),
+            CASE,
+            "builtin",
+            1,
+            tmp_path / "results",
+            tmp_path,
+            30.0,
+            work_root,
+        )
+        seen = json.loads(record["final_text"])
+        assert Path(seen["cwd"]).resolve().is_relative_to(work_root.resolve())
+        assert Path(seen["home"]).resolve().is_relative_to(work_root.resolve())
+        # The evidence stays with the results; the scratch directory is removed.
+        assert Path(record["run_dir"]).is_relative_to(tmp_path / "results")
+        assert list(work_root.iterdir()) == []
+
+    def test_agent_configuration_above_the_work_root_is_found(self, tmp_path):
+        home = tmp_path / "home"
+        (home / ".claude" / "agents").mkdir(parents=True)
+        (home / "projects").mkdir()
+        (home / "projects" / "AGENTS.md").write_text("be brief")
+        work_root = home / "projects" / ".cache" / "geospatial-evals"
+
+        found = harness.inherited_agent_config(work_root)
+
+        assert home / ".claude" in found
+        assert home / "projects" / "AGENTS.md" in found
+
+    def test_only_directories_above_the_work_root_count(self, tmp_path):
+        """A home folder beside the work root, as ~ is beside /Users/Shared, is not inherited."""
+        (tmp_path / "Users" / "someone" / ".claude").mkdir(parents=True)
+        (tmp_path / "Users" / "Shared").mkdir()
+        work_root = tmp_path / "Users" / "Shared" / "geospatial-evals"
+        found = harness.inherited_agent_config(work_root)
+        assert [p for p in found if p.is_relative_to(tmp_path)] == []
+
+    def test_a_work_root_that_inherits_configuration_is_warned_about(self, tmp_path, capsys):
+        (tmp_path / ".claude").mkdir()
+        harness.warn_about_inherited_config(tmp_path / "geospatial-evals")
+        err = capsys.readouterr().err
+        assert str(tmp_path / ".claude") in err
+        assert "--work-root" in err
+        assert harness.WORK_ROOT_ENV in err
