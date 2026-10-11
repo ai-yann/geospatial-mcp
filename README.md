@@ -9,9 +9,10 @@ Built for logistics, telecom, agriculture, insurance, real estate, utilities,
 emergency response, surveying and mapping — anywhere a question starts with
 *where*.
 
-The package and command are `mcp-geospatial`. The PyPI package named
-`geospatial-mcp` is an unrelated project; installing it will not give you
-this server.
+The package and command are `mcp-geospatial`. The server is not on PyPI under
+either name: install it from this repository, as below. The PyPI package
+named `geospatial-mcp` is an unrelated project; installing it will not give
+you this server.
 
 ```
 "Where can I live within a 30-minute drive of work?"          route_isochrone
@@ -26,7 +27,8 @@ this server.
 ## Install
 
 Nothing to clone by hand. Every client below runs the server with `uvx`,
-straight from this repository.
+straight from this repository. To install it into an environment of your own
+instead, use `pip install git+https://github.com/ystoneman/geospatial-mcp`.
 
 <details open>
 <summary><b>Claude Code</b></summary>
@@ -206,7 +208,7 @@ tools — those accept a place name, which means they may geocode.
 |---|--:|---|
 | `core` | 20 | nothing |
 | `rf` | 2 | nothing |
-| `analysis` | 2 | `mcp-geospatial[stats]` |
+| `analysis` | 2 | the `stats` extra (see above) |
 
 ## Configuration
 
@@ -218,6 +220,8 @@ No API key is needed for anything. Every keyed provider has a keyless default.
 | `GEO_CACHE_DIR` | Response cache location (default `~/.cache/mcp-geospatial`) |
 | `GEO_CACHE` | `0` disables the disk cache |
 | `GEO_USER_AGENT` | Override the User-Agent sent to providers |
+| `GEO_TRACE_FILE` | Append one JSON line per tool call to this file (off by default; records arguments, so it holds locations) |
+| `GEO_TRACE_RESULTS` | `1` adds a short `preview` of each result to those lines: headline values, the first warning and note, and whether it was cached. Never geometry |
 | `NOMINATIM_URL`, `PHOTON_URL`, `OVERPASS_URL`, `VALHALLA_URL`, `OPEN_METEO_BASE_URL` | Point at self-hosted instances |
 | `OPENROUTESERVICE_API_KEY` | Optional routing upgrade over the keyless default |
 | `OPENCELLID_API_KEY` | Optional; larger cell-tower database |

@@ -82,7 +82,7 @@ def transform_point(
     src, dst = _crs_or_raise(source), _crs_or_raise(target)
     transformer = Transformer.from_crs(src, dst, always_xy=always_xy)
     out_x, out_y = transformer.transform(x, y)
-    operation = _last_operation(transformer)
+    operation = _last_operation(transformer, transformed=_finite(out_x, out_y))
     failed = None
 
     if not _finite(out_x, out_y) and pyproj.network.is_network_enabled():
@@ -109,6 +109,14 @@ def transform_point(
     accuracy = getattr(operation, "accuracy", None)
     if accuracy is not None and accuracy < 0:
         accuracy = None
+    if accuracy is None and (
+        src == dst or (operation is not None and _is_conversion_only(operation))
+    ):
+        # The same CRS on both sides is the identity, and a change of projection
+        # or axis order with no datum transformation is exact by definition.
+        # PROJ 9.5 publishes 0 for most of these; PROJ 9.8 wraps the same steps
+        # in an axis-order normalisation that publishes no accuracy.
+        accuracy = 0.0
     # The diagnostics locate the point by longitude/latitude, which assumes x/y
     # axis order. Rather than guess at a lat-first caller's intent, skip them.
     better_accuracy, missing = (
@@ -141,13 +149,42 @@ def _finite(*values: float) -> bool:
     return all(math.isfinite(v) for v in values)
 
 
-def _last_operation(transformer: Transformer) -> object | None:
-    """The operation PROJ used for the most recent point, or ``None``."""
+def _last_operation(transformer: Transformer, *, transformed: bool) -> object | None:
+    """The operation PROJ used for the most recent point, or ``None``.
+
+    ``transformed`` says whether that point came out finite. PROJ also raises
+    when it has recorded no operation for a point that did go through: a
+    transformer that resolved to a single no-op pipeline, such as EPSG:4326 to
+    OGC:CRS84 (an axis swap) or EPSG:3857 to itself. That transformer is then
+    the operation, with its own accuracy and steps. A transformer still choosing
+    between candidates publishes accuracy -1 and no steps, so falling back to it
+    never makes an unknown accuracy look exact.
+    """
     try:
         return transformer.get_last_used_operation()
     except Exception:
-        # PROJ raises when no operation ran -- e.g. the point was rejected.
-        return None
+        # With no finite point, PROJ raised because no operation ran: the point
+        # was rejected.
+        return transformer if transformed else None
+
+
+def _is_conversion_only(operation: object) -> bool:
+    """True when every step is a conversion, so no datum is changed.
+
+    A conversion (a projection, its inverse, an axis swap, a unit change) is
+    mathematically defined. Moving between datums takes a transformation step,
+    and PROJ's ballpark offsets are transformation steps too, so an operation
+    with even one of them is never treated as exact here.
+    """
+    steps = getattr(operation, "operations", None)
+    if steps:
+        return all(getattr(step, "type_name", None) == "Conversion" for step in steps)
+    # A single-step operation lists no steps of its own; its JSON names its type.
+    try:
+        kind = operation.to_json_dict().get("type")  # type: ignore[attr-defined]
+    except Exception:
+        return False
+    return bool(kind == "Conversion")
 
 
 def _grids_of(operation: object) -> list[str]:

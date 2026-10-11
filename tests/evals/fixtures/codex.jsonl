@@ -1,0 +1,7 @@
+{"type": "thread.started", "thread_id": "fixture"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "reasoning", "text": "Need the cell radius."}}
+{"type": "item.completed", "item": {"id": "item_1", "type": "mcp_tool_call", "server": "geospatial", "tool": "rf_link_budget", "arguments": {"frequency_mhz": 1800}, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_2", "type": "command_execution", "command": "python3 -c 'print(1)'", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_3", "type": "agent_message", "text": "Each cell reaches about 3.21 km."}}
+{"type": "turn.completed", "usage": {"input_tokens": 15000, "cached_input_tokens": 12000, "output_tokens": 350}}

@@ -84,6 +84,14 @@ def build_server(toolsets: str | set[str] | None = None) -> MCPServer:
     # turn. See geospatial_mcp.schema for what is removed and why.
     slim_server_schemas(mcp)
 
+    # Opt-in: one JSON line per tool call, for evaluating agents in any harness.
+    from .config import settings
+
+    if settings.trace_file:
+        from .trace import enable_tracing
+
+        enable_tracing(mcp, settings.trace_file, results=settings.trace_results)
+
     from .tools.core import set_enabled_toolsets
 
     set_enabled_toolsets(registered)

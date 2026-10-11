@@ -56,6 +56,13 @@ WMO_CODES: dict[int, str] = {
 #: Open-Meteo's documented maximum coordinates per elevation request.
 MAX_ELEVATION_POINTS = 100
 
+#: How long an elevation response stays cached. The host-wide lifetime for
+#: api.open-meteo.com is ten minutes, because the same host serves forecasts.
+#: Elevation comes from a static DEM, so inheriting that lifetime only meant a
+#: terrain profile was fetched again every ten minutes and could never be
+#: warmed ahead of time. A year matches the other DEM sources in the cache.
+ELEVATION_TTL_S = 365 * 86400.0
+
 
 def _auth_params() -> dict[str, Any]:
     return {"apikey": settings.open_meteo_key} if settings.open_meteo_key else {}
@@ -88,6 +95,7 @@ def elevations(points: Sequence[tuple[float, float]]) -> tuple[list[float | None
             **_auth_params(),
         },
         provider="Open-Meteo",
+        ttl_s=ELEVATION_TTL_S,
         timeout_s=timeout_s,
     )
     values = payload.get("elevation") if isinstance(payload, dict) else None

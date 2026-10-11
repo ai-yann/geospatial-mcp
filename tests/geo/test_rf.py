@@ -68,6 +68,13 @@ class TestLinkBudget:
         )
         assert budget.cell_radius_km > 20.0
 
+    def test_cell_area_is_the_hexagon_not_the_circle(self):
+        """Documented as the tiling hexagon; four isolated cells cover more than 4x this."""
+        budget = rf.link_budget(frequency_mhz=1800, environment="suburban")
+        r = budget.cell_radius_km
+        assert budget.cell_area_km2 == pytest.approx(3 * math.sqrt(3) / 2 * r**2, rel=1e-3)
+        assert budget.cell_area_km2 < math.pi * r**2
+
     def test_out_of_range_parameters_are_reported(self):
         """COST231-Hata is only valid from 1500-2000 MHz."""
         budget = rf.link_budget(frequency_mhz=900, model="cost231_hata")

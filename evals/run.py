@@ -41,6 +41,10 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+sys.path.insert(0, str(Path(__file__).parent))
+
+from answers import check_answer  # noqa: E402
+
 LIBRARY = Path(__file__).parent / "prompts.yaml"
 RESULTS_DIR = Path(__file__).parent / "results"
 
@@ -88,6 +92,7 @@ class CaseResult:
     upstream_outage: bool = False
     tool_selection_f1: float | None = None
     invalid_argument_calls: int = 0
+    answer_ok: bool | None = None
 
 
 def load_cases(filter_text: str | None, include_network: bool) -> list[dict[str, Any]]:
@@ -100,6 +105,7 @@ def load_cases(filter_text: str | None, include_network: bool) -> list[dict[str,
             if needle in c["id"].lower()
             or needle in c["persona"].lower()
             or needle in c["axis"].lower()
+            or needle in " ".join(c.get("tags", [])).lower()
         ]
     if not include_network:
         cases = [c for c in cases if not c.get("network")]
@@ -249,6 +255,8 @@ async def run_agent(cases: list[dict[str, Any]], model: str) -> list[CaseResult]
         ]
 
         for case in cases:
+            if case.get("harness_only"):
+                continue  # needs file writes; see evals/harness.py
             started = time.monotonic()
             messages: list[dict[str, Any]] = [{"role": "user", "content": case["prompt"]}]
             called: list[str] = []
@@ -284,7 +292,7 @@ async def run_agent(cases: list[dict[str, Any]], model: str) -> list[CaseResult]
                         {
                             "type": "tool_result",
                             "tool_use_id": use.id,
-                            "content": json.dumps(body)[:6000],
+                            "content": _clip(json.dumps(body)),
                             "is_error": bool(outcome.is_error),
                         }
                     )
@@ -302,7 +310,10 @@ async def run_agent(cases: list[dict[str, Any]], model: str) -> list[CaseResult]
             recall = len(hit) / len(expected) if expected else 1.0
             f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
 
-            passed = bool(expected <= called_set) and not forbidden_called
+            answer_ok, answer_detail = check_answer(case.get("answer"), final_text)
+            passed = (
+                bool(expected <= called_set) and not forbidden_called and answer_ok is not False
+            )
             detail = ""
             if not expected <= called_set:
                 detail = f"missed {sorted(expected - called_set)}"
@@ -310,6 +321,8 @@ async def run_agent(cases: list[dict[str, Any]], model: str) -> list[CaseResult]
                 detail += f" called forbidden {forbidden_called}"
             if invalid_arguments:
                 detail += f" ({invalid_arguments} invalid tool calls)"
+            if answer_ok is False:
+                detail += f" answer: {answer_detail}"
 
             results.append(
                 CaseResult(
@@ -326,10 +339,22 @@ async def run_agent(cases: list[dict[str, Any]], model: str) -> list[CaseResult]
                     tool_selection_f1=round(f1, 4),
                     invalid_argument_calls=invalid_arguments,
                     upstream_outage=_is_upstream_outage(detail),
+                    answer_ok=answer_ok,
                 )
             )
             print(f"  {'PASS' if passed else 'FAIL'}  {case['id']:38} {detail[:70]}")
     return results
+
+
+#: Tool results are passed whole up to this size. The old 6,000-character cut
+#: sliced geometry mid-JSON, so the model was scored on data it could not parse.
+MAX_RESULT_CHARS = 100_000
+
+
+def _clip(text: str) -> str:
+    if len(text) <= MAX_RESULT_CHARS:
+        return text
+    return text[:MAX_RESULT_CHARS] + f"... [cut by the eval runner at {MAX_RESULT_CHARS} chars]"
 
 
 # ------------------------------------------------------------------ reporting
@@ -387,12 +412,22 @@ def report(results: list[CaseResult], mode: str, model: str | None) -> int:
         validity = 1.0 - (bad_calls / total_calls) if total_calls else 1.0
 
         print("\n  metrics:")
+        answered = [r.answer_ok for r in results if r.answer_ok is not None]
         rows = [
             ("tool-selection F1", mean_f1, GATES["tool_selection_f1"], "min"),
             ("first-call accuracy", first_ok / total, GATES["first_call_accuracy"], "min"),
             ("argument validity", validity, GATES["argument_validity"], "min"),
             ("distractor rate", distractors / total, MAX_DISTRACTOR_RATE, "max"),
         ]
+        if answered:
+            rows.append(
+                (
+                    "answer correctness",
+                    sum(answered) / len(answered),
+                    GATES["answer_correctness"],
+                    "min",
+                )
+            )
         for label, value, gate, direction in rows:
             ok = value >= gate if direction == "min" else value <= gate
             flag = "PASS" if ok else "FAIL"

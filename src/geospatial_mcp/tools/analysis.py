@@ -14,7 +14,7 @@ from .._sdk import MCPServer, compute
 from ..errors import GeoInputError
 from ..geo import grids
 from ..models import GeoModel, ResponseMeta
-from ._shared import meta, resolve
+from ._shared import meta, require_metres, resolve
 
 __all__ = ["register"]
 
@@ -79,6 +79,8 @@ def register(mcp: MCPServer) -> None:
         """
         from ..geo.stats import cluster_points
 
+        if algorithm == "dbscan":  # hdbscan ignores eps_m, so it cannot mislead
+            require_metres(eps_m, name="eps_m", example="500  (points within 500 m are neighbours)")
         parsed = _parse_points(points)
         clusters, noise = cluster_points(
             parsed, eps_m=eps_m, min_samples=min_samples, algorithm=algorithm

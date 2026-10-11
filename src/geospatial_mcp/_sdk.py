@@ -12,9 +12,18 @@ from __future__ import annotations
 
 from mcp import MCPError
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-__all__ = ["MCPError", "MCPServer", "ToolAnnotations", "compute", "network", "read_only"]
+__all__ = [
+    "MCPError",
+    "MCPServer",
+    "ToolAnnotations",
+    "ToolError",
+    "compute",
+    "network",
+    "read_only",
+]
 
 
 def read_only(*, open_world: bool) -> ToolAnnotations:

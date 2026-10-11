@@ -6,12 +6,73 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `GEO_TRACE_RESULTS=1` adds a `preview` to each line of the `GEO_TRACE_FILE`
+  call log: the result's headline values (a cell radius, an elevation, the
+  place a name was matched to), its first warning and note, and whether it came
+  from the cache. Warnings and notes keep up to 200 characters, other text up
+  to 100, and anything longer is cut between words and ends in an ellipsis.
+  The whole preview is capped at 600 characters and never includes geometry.
+- `evals/harness.py` warns on stderr when the path of its work root
+  (`--work-root` or `GEO_EVALS_WORK_ROOT`) holds a word that could tell the
+  model what is being tested, such as `geospatial`, `mcp`, `eval`, `tool` or a
+  tool-name domain like `rf`, and records the words in `summary.json` as
+  `work_root_hint_words`. Claude Code shows the model its working directory. On
+  `telecom-cell-area-sum-007` with Sonnet 5.5 in October 2026, runs under
+  `/Users/Shared/geospatial-evals` called `rf_link_budget` and passed in 6 of 11
+  runs, and runs under neutral folders in 0 of 20. That is one case and one
+  model, so how far the effect reaches is not known. `evals/README.md` now
+  recommends a neutral work root such as `/Users/Shared/agent-runs`. The
+  default, `~/.cache/geospatial-evals`, carries the hint but is unchanged, so
+  that new runs compare with the Claude Code runs recorded under it in
+  September 2026, whose tool use the hint may have inflated.
+
 ### Changed
 
 - The default `tools/list` is about 16% smaller (47.8k to 40.0k characters).
   Tool descriptions no longer carry docstring indentation, and the `meta`
   definition repeated in every output schema is reduced to a bare object; the
   server instructions describe `meta` once.
+- `rf_link_budget` now says that `cell_area_km2` is the hexagonal area one site
+  serves in a tiled plan (2.598·r²), not the area of one isolated circular cell
+  (π·r²). Summing it for non-overlapping sites undercounted their coverage by
+  about 17%, and nothing in the schema said so.
+- Distances under 1 m are refused as probably being degrees, in
+  `geom_transform` buffers and the `rf_towers`, `place_search` and
+  `stats_cluster` (DBSCAN) radii. A model that converted 7.5 km to 0.0674 and
+  sent it as metres got a 7 cm buffer, or an empty search reported as an
+  absence of data. The error now says what happened and how to fix it.
+- Open-Meteo elevation responses are cached for a year. They used to expire
+  after ten minutes, the lifetime meant for forecasts from the same host, so a
+  terrain profile or line-of-sight check could not be fetched in advance.
+- The release workflow no longer uploads to PyPI. The project owns no package
+  there and installs from this repository, so a release only builds the wheel
+  and sdist. The publish job is kept, switched off, with the steps for turning
+  it back on.
+
+### Fixed
+
+- Error messages reach the model with every `mcp` 2.x. From `mcp` 2.1 the SDK
+  tells the model only `Error executing tool <name>` when a tool raises
+  anything other than a `ToolError`, so on a fresh install every input error,
+  including the one that explains a distance looks like degrees, lost its text.
+  `GeoError` now subclasses `ToolError`. `uv.lock` still pins 2.0.0, so a new CI
+  job runs the tests against the newest 2.x as well.
+- The install commands in error messages about a missing extra fetch the
+  server from this repository. They named a PyPI package, but the server is
+  not on PyPI, and the PyPI package named `geospatial-mcp` is an unrelated
+  project. `server.json` no longer lists a PyPI package for the same reason.
+- `coord_transform_crs` reports a change of projection or axis order with no
+  datum transformation as exact on every PROJ, and so does a call with the
+  same CRS on both sides. It used to say the accuracy was unknown in two
+  cases. PROJ 9.8, which pyproj 3.8 bundles and a fresh install resolves,
+  publishes no accuracy for operations such as EPSG:4326 to EPSG:3857. And on
+  PROJ 9.5 and 9.8 alike, an axis-order change alone (EPSG:4326 to OGC:CRS84)
+  or a CRS to itself (EPSG:3857 to EPSG:3857) leaves no record of the operation
+  used for the point, so the tool had no steps to inspect. An operation with
+  any datum transformation step, a ballpark offset included, is still never
+  counted as exact.
 
 ## [0.1.0]
 
@@ -25,8 +86,9 @@ First release.
   Desktop, OpenAI Codex CLI, Cursor, VS Code, Zed, Windsurf and Gemini CLI.
   Streamable HTTP is available with `--transport http` for self-hosting, and
   binds `127.0.0.1` unless the platform sets `PORT`.
-- Installable with `uvx` as `mcp-geospatial` — no system packages, binary
-  wheels on Linux, macOS and Windows across x86-64 and ARM.
+- Installable with `uvx` from this repository as `mcp-geospatial`, with no
+  system packages: binary wheels on Linux, macOS and Windows across x86-64 and
+  ARM.
 - Toolsets gated by `GEO_TOOLSETS` / `--toolsets`, with `default` (22 tools),
   `all`, and an `offline` preset of the 13 tools that make no network call.
 

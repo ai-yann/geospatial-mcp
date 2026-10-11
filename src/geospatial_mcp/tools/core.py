@@ -41,6 +41,7 @@ from ._shared import (
     clamp,
     far_alternatives,
     meta,
+    require_metres,
     resolve,
     resolve_pair,
 )
@@ -450,6 +451,7 @@ def _register_geometry(mcp: MCPServer) -> None:
                     problem="A buffer needs a non-zero distance in metres.",
                     example="1000  (a 1 km buffer)",
                 )
+            require_metres(distance_m, name="distance_m", example="7500  (a 7.5 km buffer)")
             result = geodesic_buffer(geom, distance_m)
         elif operation == "simplify":
             result = simplify_geometry(geom, distance_m or 10.0)
@@ -764,6 +766,7 @@ def _register_places(mcp: MCPServer) -> None:
         """
         from ..net.providers import overpass
 
+        require_metres(radius_m, name="radius_m", example="2000  (a 2 km search radius)")
         loc = resolve(location)
         lat, lon = loc.as_tuple()
         raw, cached = overpass.around(lat, lon, radius_m, category, limit=limit)

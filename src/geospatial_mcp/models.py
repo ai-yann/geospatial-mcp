@@ -35,9 +35,9 @@ class ResponseMeta(GeoModel):
     """Provenance and caveats. See the server instructions for how to use it.
 
     Field descriptions here are deliberately terse: this model is embedded in
-    the output schema of every single tool, so each character is paid for 25
-    times over on every turn. The full explanation lives once, in the server
-    instructions, rather than 25 times in the schema.
+    the output schema of every single tool, so each character is paid for once
+    per tool on every turn. The full explanation lives once, in the server
+    instructions, rather than once per tool in the schema.
     """
 
     sources: list[str] = Field(default_factory=list, description="Data providers used.")

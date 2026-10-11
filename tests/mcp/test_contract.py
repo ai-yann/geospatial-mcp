@@ -28,6 +28,37 @@ NAME_PATTERN = re.compile(
 #: more tools, not for letting existing ones grow.
 SCHEMA_BUDGET_CHARS = 50_000
 
+#: Either name this server has gone by. Neither is this server's on PyPI:
+#: geospatial-mcp is an unrelated project, and mcp-geospatial is unowned.
+_NAME = r"(?:mcp-geospatial|geospatial-mcp)"
+#: Options whose next word is their value, not the package to install.
+#: `--with` adds a package beside the one being run, so it is here too.
+_VALUED = r"(?:-p|--python|-i|--index-url|--extra-index-url|-P|--(?:refresh|reinstall|upgrade)-package|--with)"
+#: A version specifier clause, as in `==0.1.0` or `>=0.1`.
+_CLAUSE = r"(?:===|==|~=|!=|>=|<=|<|>)\s*[\w.*!+-]+"
+
+#: An install command whose package is this server's name alone, with or
+#: without extras or a version, rather than a git source.
+BARE_INSTALL = re.compile(
+    rf"""
+    \b(?:pip3?\ install|uv\ pip\ install|pipx\ (?:install|run)|uv\ tool\ (?:install|run)|uv\ add|uvx)
+    (?:\s+(?:                                # options before the package:
+        {_VALUED}(?:\s+|=)\S+                #   one that takes a value
+      | (?!(?:{_VALUED}|--from|--spec)(?:\s|=))
+        -{{1,2}}[A-Za-z][\w-]*(?:=\S+)?      #   a flag such as -U or --upgrade
+    ))*
+    # The package. `--from` and `--spec` name it for uvx, `uv tool run` and
+    # `pipx run`. When they name a git source instead, the word after them is
+    # only the command, so they are never skipped as plain options.
+    \s+(?:(?:--from|--with|--spec)(?:\s+|=))?['"]?{_NAME}
+    (?:\[[\w,\s-]*\])?                       # extras
+    (?!\s+@|\s*@\s*(?:[a-z]+\+|[a-z]+:))     # not a direct reference: name @ git+...
+    (?:@[\w.!+-]+|\s*{_CLAUSE}(?:\s*,\s*{_CLAUSE})*)?  # @version, or ==, >= and so on
+    ['"]?(?=\s|$|`)
+    """,
+    re.VERBOSE,
+)
+
 
 class TestNaming:
     async def test_every_tool_follows_the_naming_convention(self):
@@ -322,6 +353,132 @@ class TestExtrasGating:
         message = str(exc.value)
         assert "stats" in message
         assert "pip install" in message, "the error must carry the command that fixes it"
+        assert "git+https://github.com/ystoneman/geospatial-mcp" in message
+
+    def test_install_commands_fetch_this_repository_not_the_pypi_name(self):
+        """The server is not on PyPI, and the PyPI geospatial-mcp is an unrelated project.
+
+        The package and command names are read from pyproject.toml, so a rename
+        that misses the install helper fails here.
+        """
+        import tomllib
+        from pathlib import Path
+
+        from packaging.requirements import Requirement
+
+        from geospatial_mcp.errors import GeoUnavailable, install_commands
+
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        project = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]
+        (command,) = project["scripts"]
+        uvx, pip = install_commands("stats")
+        requirement = Requirement(pip.removeprefix("pip install ").strip("'"))
+        assert requirement.name == project["name"]
+        assert requirement.extras == {"stats"}
+        assert requirement.url == "git+https://github.com/ystoneman/geospatial-mcp"
+        assert uvx.startswith("uvx --from ") and uvx.endswith(f" {command}")
+        assert uvx in str(GeoUnavailable("Clustering", "stats"))
+
+    def test_no_install_line_names_a_bare_package(self):
+        """`pip install mcp-geospatial` would fetch whatever owns that name on PyPI."""
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[2]
+        named = ("README.md", "CONTRIBUTING.md", "AGENTS.md", "CHANGELOG.md", "Dockerfile")
+        files = [
+            *(root / name for name in (*named, "Makefile", "railway.toml", "evals/README.md")),
+            *(root / "docs").glob("*.md"),
+            *(root / "src").rglob("*.py"),
+            *(root / ".github").rglob("*.yml"),
+        ]
+        offenders = [
+            f"{path.relative_to(root)}:{number}: {line.strip()}"
+            for path in files
+            if path.is_file()
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+            if BARE_INSTALL.search(line)
+        ]
+        assert not offenders, "install from git instead:\n" + "\n".join(offenders)
+
+    @pytest.mark.parametrize(
+        ("line", "bare"),
+        [
+            ("pip install mcp-geospatial", True),
+            ("uvx mcp-geospatial --toolsets all", True),
+            ("uvx geospatial-mcp", True),
+            ("pip install 'mcp-geospatial[stats]'", True),
+            ("uvx --with 'mcp-geospatial[stats]' mcp-geospatial", True),
+            ("uv tool install mcp-geospatial", True),
+            # Every verb that fetches a package to install or run.
+            ("pip3 install mcp-geospatial", True),
+            ("uv pip install --system mcp-geospatial", True),
+            ("uv add 'mcp-geospatial[stats]'", True),
+            ("pipx run mcp-geospatial", True),
+            ("pipx run --spec mcp-geospatial mcp-geospatial", True),
+            ("uv tool run mcp-geospatial --toolsets all", True),
+            ("uv tool run --from mcp-geospatial mcp-geospatial", True),
+            # Options between the verb and the name.
+            ("pip install -U mcp-geospatial", True),
+            ("python -m pip install --user --upgrade 'mcp-geospatial[stats]'", True),
+            ("uv tool install --python 3.13 mcp-geospatial", True),
+            ("uvx --python=3.13 --refresh mcp-geospatial", True),
+            ("uvx --refresh-package mcp-geospatial mcp-geospatial", True),
+            # A version or a specifier after the name.
+            ("uvx mcp-geospatial@latest", True),
+            ("uvx mcp-geospatial@0.1.0 --toolsets all", True),
+            ("`pipx install geospatial-mcp==0.1.0`", True),
+            ("pip install 'mcp-geospatial[stats]>=0.1,<0.2'", True),
+            ("uv add mcp-geospatial~=0.1", True),
+            ("uvx --from git+https://github.com/ystoneman/geospatial-mcp mcp-geospatial", False),
+            ("pip install git+https://github.com/ystoneman/geospatial-mcp", False),
+            (
+                "pip install 'mcp-geospatial[stats] @ git+https://github.com/ystoneman/geospatial-mcp'",
+                False,
+            ),
+            ("mcp-geospatial --toolsets core", False),
+            # Git sources stay allowed whatever the verb, options or spelling.
+            (
+                "uvx --from 'mcp-geospatial[stats] @ git+https://github.com/ystoneman/geospatial-mcp'"
+                " mcp-geospatial --toolsets all",
+                False,
+            ),
+            (
+                "pip install -U 'mcp-geospatial[stats] @ git+https://github.com/ystoneman/geospatial-mcp'",
+                False,
+            ),
+            ("pip install mcp-geospatial@git+https://github.com/ystoneman/geospatial-mcp", False),
+            (
+                "pipx run --spec git+https://github.com/ystoneman/geospatial-mcp mcp-geospatial",
+                False,
+            ),
+            (
+                "uv tool run --from git+https://github.com/ystoneman/geospatial-mcp mcp-geospatial",
+                False,
+            ),
+            ("uvx --from=git+https://github.com/ystoneman/geospatial-mcp mcp-geospatial", False),
+            (
+                "uv tool install --python 3.13 git+https://github.com/ystoneman/geospatial-mcp",
+                False,
+            ),
+            (
+                "uvx --refresh-package mcp-geospatial"
+                " --from git+https://github.com/ystoneman/geospatial-mcp mcp-geospatial",
+                False,
+            ),
+            # Another package whose name only starts with this one's.
+            ("pip install mcp-geospatial-extras", False),
+        ],
+    )
+    def test_the_bare_install_pattern_fires_only_on_bare_names(self, line, bare):
+        assert bool(BARE_INSTALL.search(line)) is bare
+
+    def test_server_json_lists_no_pypi_package(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[2]
+        server = json.loads((root / "server.json").read_text(encoding="utf-8"))
+        assert server["repository"]["url"] == "https://github.com/ystoneman/geospatial-mcp"
+        assert not [p for p in server.get("packages", []) if p.get("registryType") == "pypi"]
 
     def test_toolsets_without_an_extra_never_probe(self):
         from geospatial_mcp.tools import _require_extra

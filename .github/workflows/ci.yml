@@ -61,6 +61,22 @@ jobs:
       - run: uv sync
       - run: uv run pytest -q --cov=geospatial_mcp --cov-report=term-missing
 
+  newest-sdk:
+    # uv.lock pins the MCP SDK, but `uvx --from git+...` ignores the lock and
+    # installs the newest mcp 2.x. mcp 2.1 started hiding the message of any tool
+    # exception that is not a ToolError, which no test on the locked 2.0 could
+    # show. This job runs the suite against what a fresh install actually gets.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Resolve the newest mcp 2.x instead of the locked version
+        run: uv sync --all-extras --upgrade-package mcp
+      - run: uv run --no-sync python -c "import importlib.metadata as m; print('mcp', m.version('mcp'))"
+      - run: uv run --no-sync pytest -q
+
   evals:
     # Validates that the eval library still matches the tool surface. Offline
     # cases only -- the network ones run in live-apis.yml.

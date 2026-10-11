@@ -18,6 +18,7 @@ __all__ = [
     "clamp",
     "far_alternatives",
     "meta",
+    "require_metres",
     "resolve",
     "resolve_pair",
 ]
@@ -208,3 +209,26 @@ def as_geometry_text(value: GeometryInput | None) -> str | None:
 
 def clamp(value: int, low: int, high: int) -> int:
     return max(low, min(value, high))
+
+
+#: The smallest distance a metres parameter accepts. Below it, the value is
+#: almost always a distance in degrees: a model that converts 7.5 km to 0.0674
+#: and passes it as metres gets a 7 cm buffer, or a search radius that finds
+#: nothing and is then reported as an absence of data. A genuine sub-metre
+#: buffer is possible with survey-grade input, but rare in this server's work,
+#: and an error the model can correct beats a silently wrong answer.
+MIN_METRES = 1.0
+
+
+def require_metres(value: float, *, name: str, example: str) -> float:
+    """Reject a non-zero distance too small to be metres; it is probably degrees."""
+    if 0 < abs(value) < MIN_METRES:
+        raise GeoInputError.with_example(
+            got=value,
+            problem=(
+                f"{name} is in metres, and {value:g} m is under {MIN_METRES:g} m -- "
+                "that looks like a distance in degrees. Convert it to metres."
+            ),
+            example=example,
+        )
+    return value

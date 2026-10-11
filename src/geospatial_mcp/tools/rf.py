@@ -17,7 +17,7 @@ from pydantic import Field
 from .._sdk import MCPServer, compute, network
 from ..geo import rf
 from ..models import GeoModel, ResponseMeta
-from ._shared import meta, resolve
+from ._shared import meta, require_metres, resolve
 
 __all__ = ["register"]
 
@@ -29,7 +29,12 @@ def register(mcp: MCPServer) -> None:
         shadow_margin_db: float
         max_path_loss_with_margin_db: float
         cell_radius_km: float
-        cell_area_km2: float
+        cell_area_km2: float = Field(
+            description=(
+                "Hexagonal area one site serves when cells tile a plan: 2.598 * r^2. "
+                "One isolated circular cell covers pi * r^2."
+            )
+        )
         model: str
         environment: str
         inputs: dict[str, Any]
@@ -84,6 +89,11 @@ def register(mcp: MCPServer) -> None:
         Works out EIRP, the loss budget available to the link, and how far that
         reaches under the chosen propagation model. Use it to size cell coverage,
         compare frequency bands, or check whether a proposed link closes.
+
+        cell_area_km2 is the hexagonal area one site serves when cells tile a
+        network plan (2.598 * r^2), not the footprint of one isolated circular
+        cell (pi * r^2) -- about 17% smaller, so summing it undercounts the
+        coverage of sites that do not overlap.
 
         Reports a warning when parameters fall outside the model's published
         validity range -- an empirical model used out of range still returns a
@@ -164,6 +174,7 @@ def register(mcp: MCPServer) -> None:
         """
         from ..net.providers import cells
 
+        require_metres(radius_m, name="radius_m", example="1000  (a 1 km search radius)")
         loc = resolve(location)
         lat, lon = loc.as_tuple()
         towers, provider, cached = cells.towers_near(lat, lon, radius_m)

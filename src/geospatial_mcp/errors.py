@@ -9,16 +9,26 @@ reads the failure as a success and proceeds on made-up data. Raising sets
 ``is_error=True`` and puts the message in front of the model, which can then
 correct itself.
 
+Only if the exception is a ``ToolError``, though. From ``mcp`` 2.1 the SDK
+treats any other exception from a tool as a crash: the model is told only
+``Error executing tool <name>``, and the message stays in the server log. So
+:class:`GeoError` subclasses the SDK's ``ToolError``. Without that, every
+message below, each written to teach the model a fix, would reach it as that
+one generic line. ``tests/mcp/test_error_quality.py`` checks the base class.
+
 Two tiers:
 
 * :class:`GeoInputError` and its subclasses -- the model can plausibly recover.
   The message reaches the model, so it must say what was received, why that is
   wrong, and show a valid example.
 * :class:`GeoConfigError` -- operator misconfiguration the model cannot fix
-  (missing API key, bad base URL). Raised as ``MCPError`` so the host sees it.
+  (missing API key, bad base URL). The message still reaches the model, so it
+  can tell the user what the operator has to change.
 """
 
 from __future__ import annotations
+
+from ._sdk import ToolError
 
 __all__ = [
     "GeoConfigError",
@@ -28,11 +38,27 @@ __all__ = [
     "GeoRateLimited",
     "GeoUnavailable",
     "GeoUpstreamError",
+    "install_commands",
 ]
 
+#: Where the server installs from. It is not on PyPI, and the PyPI package named
+#: ``geospatial-mcp`` is an unrelated project, so an install command that gives
+#: only a package name would fail or fetch someone else's code.
+INSTALL_SOURCE = "git+https://github.com/ystoneman/geospatial-mcp"
 
-class GeoError(Exception):
-    """Base class for every error this package raises deliberately."""
+
+def install_commands(extra: str) -> tuple[str, str]:
+    """The ``uvx`` and ``pip`` commands that install this server with ``extra``."""
+    requirement = f"'mcp-geospatial[{extra}] @ {INSTALL_SOURCE}'"
+    return f"uvx --from {requirement} mcp-geospatial", f"pip install {requirement}"
+
+
+class GeoError(ToolError):
+    """Base class for every error this package raises deliberately.
+
+    A ``ToolError``, so the SDK passes the message to the model rather than
+    replacing it with a generic one. See the module docstring.
+    """
 
 
 class GeoInputError(GeoError, ValueError):
@@ -88,8 +114,8 @@ class GeoUnavailable(GeoError):
     """An optional dependency or dataset needed for this tool is not installed."""
 
     def __init__(self, feature: str, extra: str) -> None:
+        uvx, pip = install_commands(extra)
         super().__init__(
             f"{feature} requires the optional '{extra}' extra, which is not installed. "
-            f"Install it with:  uvx --with 'mcp-geospatial[{extra}]' mcp-geospatial   "
-            f"(or:  pip install 'mcp-geospatial[{extra}]')"
+            f"Install it with:  {uvx}   (or:  {pip})"
         )

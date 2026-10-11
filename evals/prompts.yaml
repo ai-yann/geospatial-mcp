@@ -584,3 +584,232 @@ cases:
       assert: ["cell_count >= 1", "point_count == 4"]
   rubric: Returns H3 cells with counts, suitable for a heat map.
   max_turns: 4
+
+# ------------------------------------------------------------ demo scenarios
+# The chains shown in talks and demos, held to the same gates as everything
+# else. Tagged `demo`, so `--filter demo` runs just these. Each carries an
+# `answer` block (see evals/answers.py): a demo that looks right but reports
+# the wrong number should fail here before it fails on stage.
+
+- id: emergency-grid-whats-there-004
+  persona: emergency_response
+  axis: polymorphism
+  tags: [demo]
+  prompt: >
+    What are the coordinates of grid reference 30SUF6542755114, and what's there?
+  expect_tools: [place_reverse]
+  optional_tools: [coord_convert, coord_describe]
+  forbid_tools: [place_geocode]
+  network: true
+  validate:
+    - tool: place_reverse
+      args: {location: "30SUF6542755114"}
+      assert: ["'Palacio de Congresos' in display_name"]
+  answer:
+    patterns: ["Palacio de Congresos", "36\\.63", "4\\.50"]
+  rubric: >
+    Gives decimal degrees and names the Palacio de Congresos y Exposiciones de
+    la Costa del Sol in Torremolinos.
+  max_turns: 4
+
+- id: consumer-trip-conditions-004
+  persona: consumer
+  axis: chain
+  tags: [demo]
+  prompt: >
+    We're visiting the Caminito del Rey tomorrow. How high up is it, and what's
+    the weather forecast there?
+  expect_tools: [place_geocode, terrain_elevation, env_weather]
+  optional_tools: [coord_convert, sun_moon, place_search]
+  network: true
+  validate:
+    - tool: place_geocode
+      args: {query: "Caminito del Rey", country_codes: "es"}
+      assert: ["len(matches) >= 1"]
+    - tool: terrain_elevation
+      args: {location: "36.9320722,-4.7880471"}
+      assert: ["elevation_m is not None"]
+    - tool: env_weather
+      args: {location: "36.9320722,-4.7880471", days: 2}
+      assert: ["'daily' in result"]
+  answer:
+    numbers: [{near: 306, tol: 150}]
+  rubric: >
+    Reports an elevation from the DEM with its source, and a forecast with
+    temperatures. Passes on the weather attribution.
+  max_turns: 6
+
+- id: telecom-line-of-sight-004
+  persona: telecom
+  axis: chain
+  tags: [demo]
+  prompt: >
+    Could we get a 5.8 GHz point-to-point link from the Palacio de Congresos in
+    Torremolinos to the summit of Monte Calamorro? Assume 10 m masts at both
+    ends.
+  expect_tools: [terrain_profile]
+  optional_tools: [place_geocode, geom_measure, terrain_elevation, coord_convert, rf_link_budget]
+  forbid_tools: [route_directions]
+  network: true
+  validate:
+    - tool: terrain_profile
+      args: {origin: "36.6320866,-4.5051825", destination: "36.6168069,-4.5610885", samples: 40}
+      assert: ["statistics['max_m'] > 600", "statistics['gaps'] == 0"]
+  answer:
+    patterns: ["fresnel"]
+  rubric: >
+    Samples the ground between the two ends, checks clearance of the first
+    Fresnel zone at 5.8 GHz, and names the critical point. A strong answer
+    notices that the geocoded peak is not the highest point of the profile,
+    so the verdict depends on exactly where the summit mast stands.
+  max_turns: 8
+
+- id: telecom-four-site-coverage-005
+  persona: telecom
+  axis: chain
+  tags: [demo]
+  prompt: >
+    I need LTE coverage at 1800 MHz over a 15 x 15 km square centred on Málaga.
+    Suburban clutter, 45 m masts, 43 dBm transmitters into 15 dBi antennas,
+    -105 dBm receivers. Can four sites cover it? Where would you put them, and
+    what percentage of the square would they cover?
+  expect_tools: [rf_link_budget]
+  optional_tools: [geom_transform, geom_overlay, geom_measure, place_geocode, coord_convert]
+  network: false
+  validate:
+    - tool: rf_link_budget
+      args: {frequency_mhz: 1800, environment: suburban, tx_power_dbm: 43,
+             tx_gain_dbi: 15, tx_height_m: 45, rx_sensitivity_dbm: -105}
+      assert: ["3.1 < cell_radius_km < 3.3"]
+    - tool: geom_transform
+      args: {geojson: "MULTIPOINT((-4.4842 36.7310), (-4.4002 36.7310), (-4.4842 36.7986), (-4.4002 36.7986))",
+             operation: buffer, distance_m: 3205.5}
+      assert: ["128 < measurements['area_km2'] < 131"]
+  answer:
+    numbers: [{near: 3.21, tol: 0.1}, {near: 57.4, tol: 3}]
+  rubric: >
+    Derives a cell radius of about 3.2 km from the link budget. Four
+    non-overlapping cells cover about 129 of the 225 km2 (about 57%), so four
+    sites cannot cover the square with these parameters.
+  max_turns: 8
+
+- id: telecom-four-site-fix-006
+  persona: telecom
+  axis: chain
+  tags: [demo]
+  prompt: >
+    Four LTE sites at 1800 MHz, one per quadrant, have to reach every corner of
+    a 15 x 15 km square in a suburban area. What cell radius does each need?
+    Would 60 m masts and -110 dBm receivers get there, or should we change band?
+  expect_tools: [rf_link_budget]
+  optional_tools: [geom_measure, geom_transform]
+  network: false
+  validate:
+    - tool: rf_link_budget
+      args: {frequency_mhz: 1800, environment: suburban, tx_height_m: 60, rx_sensitivity_dbm: -110}
+      assert: ["5.2 < cell_radius_km < 5.3"]
+    - tool: rf_link_budget
+      args: {frequency_mhz: 800, environment: suburban, model: hata}
+      assert: ["cell_radius_km > 10"]
+  answer:
+    numbers: [{near: 5.30, tol: 0.1}]
+    patterns: ["\\b(700|800|900)\\s*MHz"]
+  rubric: >
+    Each site must reach half a quadrant's diagonal, about 5.30 km. 60 m masts
+    and -110 dBm reach about 5.26 km, just short. A sub-GHz band (800 MHz
+    reaches about 13 km) solves it.
+  max_turns: 8
+
+- id: telecom-cell-area-sum-007
+  persona: telecom
+  axis: correctness
+  tags: [demo]
+  prompt: >
+    Four LTE cells at 1800 MHz in a suburban area (45 m masts, 43 dBm into
+    15 dBi antennas, -105 dBm receivers) are far enough apart that they don't
+    overlap. How many square kilometres do they cover in total?
+  expect_tools: [rf_link_budget]
+  network: false
+  validate:
+    - tool: rf_link_budget
+      args: {frequency_mhz: 1800, environment: suburban}
+      assert: ["abs(cell_area_km2 - 2.598 * cell_radius_km ** 2) < 0.01"]
+  answer:
+    numbers: [{near: 129.1, tol: 3}]
+  rubric: >
+    Uses the area of a circle of the returned radius for each isolated cell
+    (about 32.3 km2), not the hexagonal planning area (26.7 km2): about
+    129 km2 in total.
+  max_turns: 4
+
+- id: insurance-zone-geojson-002
+  persona: insurance
+  axis: correctness
+  tags: [demo]
+  harness_only: true  # needs a harness that can write files
+  prompt: >
+    Our flood policy covers everything within 7.5 km of Málaga Cathedral. Save
+    that zone as GeoJSON in zone.geojson and tell me its area in km2.
+  expect_tools: [geom_transform]
+  optional_tools: [place_geocode, geom_measure, coord_convert]
+  network: true
+  validate:
+    - tool: geom_transform
+      args: {geojson: '{"type":"Point","coordinates":[-4.4194052,36.7201788]}',
+             operation: buffer, distance_m: 7500}
+      assert: ["175 < measurements['area_km2'] < 178"]
+  answer:
+    numbers: [{near: 176.7, tol: 2}]
+  artifacts:
+    - file: zone.geojson
+      area_km2: {near: 176.7, tol: 3}
+      aspect: {near: 1.0, tol: 0.05}
+  rubric: >
+    Writes a true 7.5 km circle (about 177 km2, as wide as it is tall). A
+    circle drawn in degrees comes out about 141 km2 and 20% narrow east-west.
+  max_turns: 6
+
+- id: telecom-towers-caveat-008
+  persona: telecom
+  axis: caveats
+  tags: [demo]
+  prompt: >
+    How many mobile phone masts are there within 2 km of Málaga Cathedral?
+  expect_tools: [rf_towers]
+  optional_tools: [place_geocode, place_search]
+  network: true
+  validate:
+    # The keyless tower database has no records here today. If that changes,
+    # this case's premise has gone, and it should be rewritten, not relaxed.
+    - tool: rf_towers
+      args: {location: "36.7201788,-4.4194052", radius_m: 2000}
+      assert: ["count == 0"]
+  answer:
+    patterns: ["crowdsourced|no records|not (been )?mapped|absence of data|incomplete|sparse|does ?n[o'’]t mean"]
+    # Not after "doesn't mean" or "not proof": that is the caveat, not the claim.
+    forbid: ["(?<!mean )(?<!mean that )(?<!proof )(?<!proof that )there are no (cell |mobile |phone )*(towers|masts)"]
+  rubric: >
+    Reports that the database has no records within 2 km, and says that this
+    is missing data, not missing masts.
+  max_turns: 5
+
+- id: telecom-model-range-caveat-009
+  persona: telecom
+  axis: caveats
+  tags: [demo]
+  prompt: >
+    How far will a 2600 MHz LTE cell reach in a suburban area with 45 m masts
+    and 43 dBm into a 15 dBi antenna?
+  expect_tools: [rf_link_budget]
+  network: false
+  validate:
+    - tool: rf_link_budget
+      args: {frequency_mhz: 2600, environment: suburban}
+      assert: ["len(warnings) > 0"]
+  answer:
+    numbers: [{near: 2.23, tol: 0.2}]
+    patterns: ["valid(ity)?|outside|indicative|out of range"]
+  rubric: >
+    Gives about 2.2 km and repeats the warning that 2600 MHz is outside the
+    COST 231-Hata model's validity range, so the figure is indicative only.
+  max_turns: 4

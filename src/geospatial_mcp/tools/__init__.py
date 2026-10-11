@@ -23,6 +23,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..errors import install_commands
+
 if TYPE_CHECKING:  # pragma: no cover
     from .._sdk import MCPServer
 
@@ -168,13 +170,11 @@ def _require_extra(toolset: Toolset) -> None:
     except (ImportError, ValueError):
         found = False
     if not found:
+        uvx, pip = install_commands(toolset.extra or "")
         raise RuntimeError(
             f"Toolset {toolset.name!r} needs the optional '{toolset.extra}' extra, "
             f"which is not installed (missing module: {toolset.probe_module}).\n"
-            f"Install it with:\n"
-            f"  uvx --with 'mcp-geospatial[{toolset.extra}]' mcp-geospatial\n"
-            f"or:\n"
-            f"  pip install 'mcp-geospatial[{toolset.extra}]'"
+            f"Install it with:\n  {uvx}\nor:\n  {pip}"
         )
 
 
@@ -231,12 +231,10 @@ def register_toolsets(
         except ImportError as exc:
             # Fail loudly at startup with the exact install command, rather
             # than registering a tool that raises the first time it is called.
+            uvx, pip = install_commands(toolset.extra or "")
             raise RuntimeError(
                 f"Toolset {name!r} needs the optional '{toolset.extra}' extra, which "
-                f"is not installed ({exc}). Install it with:\n"
-                f"  uvx --with 'mcp-geospatial[{toolset.extra}]' mcp-geospatial\n"
-                f"or:\n"
-                f"  pip install 'mcp-geospatial[{toolset.extra}]'"
+                f"is not installed ({exc}). Install it with:\n  {uvx}\nor:\n  {pip}"
             ) from exc
         registered.append(name)
     return registered

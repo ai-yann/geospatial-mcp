@@ -360,7 +360,9 @@ def link_budget(
         rx_height_m=rx_height_m,
         environment=environment,
     )
-    # Hexagonal cell area for a given site-to-site radius.
+    # Area of the regular hexagon inscribed in the cell circle, (3*sqrt(3)/2) r^2:
+    # what each site serves when cells tile a plan without gaps. It is not the
+    # circle's area (pi r^2), which double-counts wherever neighbours overlap.
     area = 2.598 * radius**2
     return LinkBudget(
         eirp_dbm=eirp,
