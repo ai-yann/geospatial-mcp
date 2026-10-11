@@ -129,6 +129,7 @@ Every tool taking a `location` accepts **any** of these, interchangeably:
 48°51'30"N 2°17'40"E     degrees / minutes / seconds
 31UDQ4825211954          USNG / MGRS grid reference
 u09tunquc                geohash
+geohash:u09tunquc        geohash, marked so it is never taken for a place name
 891fb46741bffff          H3 cell
 8FW4V75V+9R6             Plus Code
 Eiffel Tower, Paris      a place name, geocoded for you
@@ -261,6 +262,13 @@ self-host and set the corresponding `*_URL`. See
   asks, rather than quietly answering for Illinois. When a name is clear enough
   to use, `meta.notes` says exactly which place it was taken to mean, and names
   any others that share it.
+- **A place name is not mistaken for a code.** "Bergen", "Denver" and "Sydney"
+  are spelt entirely from the geohash alphabet, and decoding them lands in
+  Alaska, the Atlantic and Turkey. A bare token is decoded as a geohash at
+  once only when it is written like one, in lowercase with a digit among the
+  letters. Anything else that could be a geohash is geocoded first, with a
+  note in `meta.notes` giving the geohash reading, and is read as a geohash
+  only if no place has the name. Write `geohash:gcpvj` to skip the lookup.
 - **Errors are errors.** Failures raise, so the MCP response is marked
   `isError`. A tool that returns `{"status": "error"}` is reported to the model
   as a success, and it will proceed on invented data.

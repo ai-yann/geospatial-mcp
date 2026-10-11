@@ -23,6 +23,7 @@ BAD_CALLS = [
     ("coord_convert", {"location": "999,999"}, "Latitude must be between"),
     ("coord_convert", {"location": "10SGJ068"}, "even number of digits"),
     ("coord_convert", {"location": ""}, "empty"),
+    ("coord_convert", {"location": "geohash:hello"}, "a, i, l and o"),
     ("coord_describe", {"value": "48.8584,2.2945"}, None),  # returns is_valid, never errors
     ("geom_transform", {"geojson": "nonsense", "operation": "buffer", "distance_m": 100}, "WKT"),
     (
