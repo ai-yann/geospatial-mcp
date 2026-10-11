@@ -80,6 +80,7 @@ class Settings:
     cache_enabled: bool = True
     toolsets: str = "default"
     trace_file: Path | None = None
+    trace_results: bool = False
     http_timeout_s: float = 15.0
     max_retries: int = 3
 
@@ -118,6 +119,7 @@ class Settings:
             cache_enabled=(e.get("GEO_CACHE", "1").lower() not in {"0", "false", "no"}),
             toolsets=e.get("GEO_TOOLSETS", "default"),
             trace_file=Path(e["GEO_TRACE_FILE"]) if e.get("GEO_TRACE_FILE") else None,
+            trace_results=(e.get("GEO_TRACE_RESULTS", "0").lower() in {"1", "true", "yes"}),
             http_timeout_s=float(e.get("GEO_HTTP_TIMEOUT", "15")),
             max_retries=int(e.get("GEO_MAX_RETRIES", "3")),
         )

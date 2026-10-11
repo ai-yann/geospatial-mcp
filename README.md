@@ -208,6 +208,7 @@ No API key is needed for anything. Every keyed provider has a keyless default.
 | `GEO_CACHE` | `0` disables the disk cache |
 | `GEO_USER_AGENT` | Override the User-Agent sent to providers |
 | `GEO_TRACE_FILE` | Append one JSON line per tool call to this file (off by default; records arguments, so it holds locations) |
+| `GEO_TRACE_RESULTS` | `1` adds a short `preview` of each result to those lines: headline values, the first warning and note, and whether it was cached. Never geometry |
 | `NOMINATIM_URL`, `PHOTON_URL`, `OVERPASS_URL`, `VALHALLA_URL`, `OPEN_METEO_BASE_URL` | Point at self-hosted instances |
 | `OPENROUTESERVICE_API_KEY` | Optional routing upgrade over the keyless default |
 | `OPENCELLID_API_KEY` | Optional; larger cell-tower database |

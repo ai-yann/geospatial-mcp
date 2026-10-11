@@ -90,7 +90,7 @@ def build_server(toolsets: str | set[str] | None = None) -> MCPServer:
     if settings.trace_file:
         from .trace import enable_tracing
 
-        enable_tracing(mcp, settings.trace_file)
+        enable_tracing(mcp, settings.trace_file, results=settings.trace_results)
 
     from .tools.core import set_enabled_toolsets
 

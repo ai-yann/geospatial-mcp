@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `GEO_TRACE_RESULTS=1` adds a `preview` to each line of the `GEO_TRACE_FILE`
+  call log: the result's headline values (a cell radius, an elevation, the
+  place a name was matched to), its first warning and note, and whether it came
+  from the cache. It is capped at 500 characters and never includes geometry.
+
 ### Changed
 
 - `rf_link_budget` now says that `cell_area_km2` is the hexagonal area one site
