@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pyproj.network
 import pytest
+from pyproj import Transformer
 
 from geospatial_mcp.errors import GeoInputError
 from geospatial_mcp.geo import crs
@@ -28,6 +29,19 @@ PROJECTION_CHANGES = [
     (448252.0, 5411935.0, "EPSG:32631", "EPSG:32632"),
     # A single-step conversion, which lists no steps of its own.
     (2.2945, 48.8584, "+proj=longlat +datum=WGS84 +no_defs", "+proj=merc +datum=WGS84 +no_defs"),
+    # An axis-order change alone, and a projected CRS to itself. PROJ resolves
+    # each to a no-op and records no last-used operation for the point.
+    (2.2945, 48.8584, "EPSG:4326", "OGC:CRS84"),
+    (2.2945, 48.8584, "OGC:CRS84", "EPSG:4326"),
+    (255422.0, 6250865.0, "EPSG:3857", "EPSG:3857"),
+    (448252.0, 5411935.0, "EPSG:32631", "EPSG:32631"),
+]
+
+#: The same CRS on both sides. PROJ routes EPSG:4326 to itself through a
+#: "Null geographic offset", a transformation step, but the identity is exact.
+SAME_CRS = [
+    (2.2945, 48.8584, "EPSG:4326"),
+    (*BNG, "EPSG:27700"),
 ]
 
 
@@ -46,8 +60,8 @@ class _NoPublishedAccuracy:
 def _hide_published_accuracy(monkeypatch: pytest.MonkeyPatch) -> None:
     real = crs._last_operation
 
-    def last_operation(transformer):
-        operation = real(transformer)
+    def last_operation(transformer, **kwargs):
+        operation = real(transformer, **kwargs)
         return None if operation is None else _NoPublishedAccuracy(operation)
 
     monkeypatch.setattr(crs, "_last_operation", last_operation)
@@ -106,6 +120,39 @@ class TestAccuracyReporting:
         """Only conversions are exact. A transformation step keeps "unknown"."""
         _hide_published_accuracy(monkeypatch)
         assert transform_point(*BNG, "EPSG:27700", "EPSG:4326").accuracy_m is None
+
+    @pytest.mark.parametrize(("x", "y", "source", "target"), PROJECTION_CHANGES)
+    def test_the_operation_for_a_projection_change_is_conversion_only(self, x, y, source, target):
+        """Where PROJ records no last-used operation, the transformer stands in.
+
+        Checked without the same-CRS shortcut, so EPSG:3857 to itself is
+        classified from its steps like every other pair.
+        """
+        transformer = Transformer.from_crs(source, target, always_xy=True)
+        transformer.transform(x, y)
+        operation = crs._last_operation(transformer, transformed=True)
+        assert operation is not None
+        assert crs._is_conversion_only(operation)
+
+    @pytest.mark.parametrize(
+        ("source", "target"), [("EPSG:27700", "EPSG:4326"), ("EPSG:4178", "EPSG:4326")]
+    )
+    def test_a_transformer_still_choosing_an_operation_is_not_conversion_only(self, source, target):
+        """The fallback must not turn a datum shift, or a ballpark offset, exact.
+
+        Before a point goes through, a transformer with several candidate
+        operations has no steps and no accuracy of its own.
+        """
+        transformer = Transformer.from_crs(source, target, always_xy=True)
+        assert not crs._is_conversion_only(transformer)
+
+    @pytest.mark.parametrize(("x", "y", "same"), SAME_CRS)
+    def test_the_same_crs_on_both_sides_is_exact(self, x, y, same, monkeypatch):
+        result = transform_point(x, y, same, same)
+        assert (result.x, result.y) == pytest.approx((x, y))
+        assert result.accuracy_m == 0.0
+        _hide_published_accuracy(monkeypatch)
+        assert transform_point(x, y, same, same).accuracy_m == 0.0
 
 
 class TestBallpark:
