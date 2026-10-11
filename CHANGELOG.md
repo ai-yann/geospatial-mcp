@@ -33,6 +33,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Open-Meteo elevation responses are cached for a year. They used to expire
   after ten minutes, the lifetime meant for forecasts from the same host, so a
   terrain profile or line-of-sight check could not be fetched in advance.
+- The release workflow no longer uploads to PyPI. The project owns no package
+  there and installs from this repository, so a release only builds the wheel
+  and sdist. The publish job is kept, switched off, with the steps for turning
+  it back on.
 
 ### Fixed
 

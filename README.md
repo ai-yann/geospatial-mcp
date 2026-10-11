@@ -9,9 +9,10 @@ Built for logistics, telecom, agriculture, insurance, real estate, utilities,
 emergency response, surveying and mapping — anywhere a question starts with
 *where*.
 
-The package and command are `mcp-geospatial`. The PyPI package named
-`geospatial-mcp` is an unrelated project; installing it will not give you
-this server.
+The package and command are `mcp-geospatial`. The server is not on PyPI under
+either name: install it from this repository, as below. The PyPI package
+named `geospatial-mcp` is an unrelated project; installing it will not give
+you this server.
 
 ```
 "Where can I live within a 30-minute drive of work?"          route_isochrone
@@ -207,7 +208,7 @@ tools — those accept a place name, which means they may geocode.
 |---|--:|---|
 | `core` | 20 | nothing |
 | `rf` | 2 | nothing |
-| `analysis` | 2 | `mcp-geospatial[stats]` |
+| `analysis` | 2 | the `stats` extra (see above) |
 
 ## Configuration
 
