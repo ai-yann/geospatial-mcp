@@ -451,7 +451,10 @@ def _server(case: dict[str, Any], run: RunPaths, server_dir: Path) -> dict[str, 
         "command": "uv",
         "args": ["run", "--directory", str(server_dir), "geospatial-mcp"],
         "env": {
-            "GEO_TRACE_FILE": str(run.trace),
+            # Absolute: `uv run --directory` starts the server in server_dir, so a
+            # relative path only lands in the run directory when server_dir is
+            # this checkout. With --server-dir elsewhere the trace went missing.
+            "GEO_TRACE_FILE": str(run.trace.absolute()),
             "GEO_TOOLSETS": toolsets,
             # Shared across runs: repeated questions hit the cache, not the free APIs.
             "GEO_CACHE_DIR": cache,

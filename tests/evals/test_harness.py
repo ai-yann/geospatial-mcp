@@ -230,3 +230,12 @@ class TestEnvironment:
         assert final.resolve() == (tmp_path / "results" / "case" / "r1" / "final.txt").resolve()
         assert argv[-1] == CASE["prompt"]
         assert "required" not in (run.home / ".codex" / "config.toml").read_text()
+
+    def test_the_trace_path_survives_a_server_dir_elsewhere(self, tmp_path, monkeypatch):
+        """`uv run --directory` moves the server, so the trace path must be absolute."""
+        monkeypatch.chdir(tmp_path)
+        run = harness.RunPaths(Path("results") / "case" / "r1")
+        server = harness._server(CASE, run, tmp_path / "other-checkout")
+        trace = Path(server["env"]["GEO_TRACE_FILE"])
+        assert trace.is_absolute()
+        assert trace.resolve() == (tmp_path / "results" / "case" / "r1" / "trace.jsonl").resolve()
