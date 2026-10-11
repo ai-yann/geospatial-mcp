@@ -111,7 +111,8 @@ args = ["--from", "git+https://github.com/ystoneman/geospatial-mcp", "geospatial
 <summary><b>Docker / self-hosted HTTP</b></summary>
 
 ```bash
-docker run -p 8000:8000 ghcr.io/ystoneman/geospatial-mcp --transport http
+docker build -t geospatial-mcp https://github.com/ystoneman/geospatial-mcp.git
+docker run -p 8000:8000 geospatial-mcp --transport http
 ```
 
 The HTTP transport binds `127.0.0.1` unless `PORT` is set by the platform. Put

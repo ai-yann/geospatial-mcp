@@ -54,7 +54,7 @@ First release.
   Desktop, OpenAI Codex CLI, Cursor, VS Code, Zed, Windsurf and Gemini CLI.
   Streamable HTTP is available with `--transport http` for self-hosting, and
   binds `127.0.0.1` unless the platform sets `PORT`.
-- Installable with `uvx` from this repository — no system packages, binary
+- Installable with `uvx` from this repository, with no system packages: binary
   wheels on Linux, macOS and Windows across x86-64 and ARM.
 - Toolsets gated by `GEO_TOOLSETS` / `--toolsets`, with `default` (22 tools),
   `all`, and an `offline` preset of the 13 tools that make no network call.

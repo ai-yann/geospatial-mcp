@@ -56,7 +56,7 @@ If you adapt code from another project:
 
 Adding a runtime dependency? Record it in `THIRD_PARTY_NOTICES.md` in the same
 commit, and prefer packages with binary wheels for Linux, macOS and Windows on
-both x86-64 and ARM — the project's promise is that the `uvx` install in the
+both x86-64 and ARM. The project's promise is that the `uvx` install in the
 README works with no system packages.
 
 ## Adding a data provider
