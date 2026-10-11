@@ -140,18 +140,43 @@ class TestResultPreview:
         assert "inputs" not in preview
         assert "meta" not in preview
 
-    async def test_the_first_warning_is_carried(self, tmp_path):
+    async def test_the_first_warning_is_carried_whole(self, tmp_path):
+        """The validity warning used to end '(1500-2000); tr'. The advice is the point."""
         record = await self._record(
             tmp_path, "rf_link_budget", {"frequency_mhz": 2600, "environment": "suburban"}
         )
-        assert "outside the published validity range" in record["preview"]["warning"]
+        warning = record["preview"]["warning"]
+        assert warning.startswith("frequency_mhz=2600 is outside the published validity range")
+        assert warning.endswith("(1500-2000); treat the result as indicative only.")
 
-    async def test_the_first_note_is_carried_and_clipped(self, tmp_path):
+    async def test_the_first_note_is_carried_whole(self, tmp_path):
         record = await self._record(tmp_path, "coord_convert", {"location": "30SUF6542755114"})
         preview = record["preview"]
         assert preview["input"] == "30SUF6542755114"
         assert preview["note"].startswith("A USNG/MGRS reference names the south-west corner")
-        assert len(preview["note"]) == 100
+        assert preview["note"].endswith("this one is 1 m on a side.")
+
+    async def test_a_long_note_is_cut_between_words(self, tmp_path):
+        """The OSTN15 note runs past 200 characters, so it is cut, but not mid-word."""
+        trace = tmp_path / "trace.jsonl"
+        server = build_server("default")
+        enable_tracing(server, trace, results=True)
+        result = await _call(
+            server,
+            "coord_transform_crs",
+            {"x": 530000, "y": 180000, "source_crs": "EPSG:27700", "target_crs": "EPSG:4326"},
+        )
+        full = result.structured_content["meta"]["notes"][0]
+        preview = _lines(trace)[0]["preview"]
+        note = preview["note"]
+
+        assert len(full) > 200
+        assert 150 < len(note) <= 200
+        assert note.endswith("…")
+        kept = note.removesuffix("…").rstrip()
+        assert full.startswith(kept)
+        assert full[len(kept)] == " ", "cut mid-word"
+        assert len(json.dumps(preview)) <= PREVIEW_LIMIT
 
     async def test_a_buffer_previews_its_area_and_never_its_geometry(self, tmp_path):
         record = await self._record(
@@ -230,16 +255,63 @@ class TestPreviewContents:
         result = SimpleNamespace(
             structured_content={
                 **fields,
-                "warnings": ["w" * 300],
-                "meta": {"cached": False, "notes": ["n" * 300]},
+                "matches": [{"display_name": "Calle Larga, " * 20}],
+                "warnings": ["the warning goes on " * 20],
+                "meta": {"cached": False, "notes": ["and the note goes on " * 20]},
             }
         )
         preview = trace_module._preview(result)
+        assert PREVIEW_LIMIT <= 600
         assert len(json.dumps(preview)) <= PREVIEW_LIMIT
-        assert preview["warning"] == "w" * 100
-        assert preview["note"] == "n" * 100
+        assert len(preview["match"]) <= 100
+        assert 180 < len(preview["warning"]) <= 200
         assert preview["cached"] is False
+        # The note is shortened, between words, so a headline value still fits.
+        assert 40 <= len(preview["note"]) < 180
+        assert preview["note"].endswith("…")
         assert "field_000" in preview
+
+    def test_a_long_warning_and_note_fit_whole_beside_the_numbers(self):
+        """Shaped like rf_link_budget: the reserve must not shorten a typical pair."""
+        result = SimpleNamespace(
+            structured_content={
+                "cell_radius_km": 2.2255,
+                "cell_area_km2": 12.8671,
+                "warnings": ["w " * 95],
+                "meta": {"cached": False, "notes": ["n " * 95]},
+            }
+        )
+        preview = trace_module._preview(result)
+        assert preview["warning"] == "w " * 95
+        assert preview["note"] == "n " * 95
+        assert preview["cell_radius_km"] == 2.2255
+        assert len(json.dumps(preview)) <= PREVIEW_LIMIT
+
+    def test_text_is_cut_between_words_with_an_ellipsis(self):
+        warning = "the warning goes on " * 20
+        clipped = trace_module._clip(warning, 200)
+        assert 180 < len(clipped) <= 200
+        assert clipped.endswith("…")
+        assert warning.startswith(clipped[:-1])
+        assert warning[len(clipped) - 1] == " ", "cut mid-word"
+        assert all(word in {"the", "warning", "goes", "on"} for word in clipped[:-1].split())
+
+    def test_a_cut_after_a_full_stop_keeps_it(self):
+        text = "First sentence is here. Second one."
+        assert trace_module._clip(text, 26) == "First sentence is here. …"
+        assert trace_module._clip(text, 33) == "First sentence is here. Second…"
+
+    def test_a_long_unbroken_string_is_cut_at_the_limit(self):
+        name = "uk_os_OSTN15_NTv2_OSGBtoETRS" * 10
+        clipped = trace_module._clip(name, 100)
+        assert len(clipped) <= 100
+        assert clipped.endswith("…")
+        assert name.startswith(clipped[:-1])
+        assert len(clipped) >= 98
+
+    def test_short_text_and_numbers_are_left_alone(self):
+        assert trace_module._clip("indicative only.", 200) == "indicative only."
+        assert trace_module._clip(3.2055, 10) == 3.2055
 
     def test_a_bare_model_is_previewed_too(self):
         """Called without convert_result, a tool returns its pydantic model."""

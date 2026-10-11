@@ -11,8 +11,9 @@ Set ``GEO_TRACE_RESULTS=1`` as well and each successful call also carries a
 ``preview``: a few headline values from the result, such as a cell radius, an
 elevation, the place a name was matched to, the first warning and note, and
 whether the answer came from the cache. It is for a person watching the calls
-go past, so it is capped at :data:`PREVIEW_LIMIT` characters and never holds
-geometry. Scoring does not read it.
+go past, so it is capped at :data:`PREVIEW_LIMIT` characters, long text is cut
+between words and marked with an ellipsis, and it never holds geometry.
+Scoring does not read it.
 
 The file holds coordinates and search terms, so tracing is never on by default.
 It is written to a file, never to stdout, which the stdio transport reserves
@@ -36,10 +37,24 @@ log = logging.getLogger(__name__)
 _lock = threading.Lock()
 
 #: Maximum length of a preview, as it is written to the trace file.
-PREVIEW_LIMIT = 500
+PREVIEW_LIMIT = 600
 
-#: Longest string kept in a preview. Notes and place names run to a sentence.
+#: Longest string field or place name kept in a preview.
 _TEXT_LIMIT = 100
+
+#: Longest warning or note kept in a preview. They run to a sentence or two,
+#: and the part that says what to do about it tends to come last.
+_SENTENCE_LIMIT = 200
+
+#: Marks a string that was cut short.
+_ELLIPSIS = "…"
+
+#: Room the place name, warning and note leave for the result's own headline
+#: values, such as a cell radius or an area.
+_SCALAR_ROOM = 150
+
+#: A warning or note shortened to fit is dropped rather than cut below this.
+_SHORTEST_TEXT = 40
 
 #: Nested objects whose scalar fields are headline numbers: area and perimeter
 #: from geometry tools, relief and ascent from terrain profiles. ``geom_measure``
@@ -115,15 +130,42 @@ def _preview(result: Any) -> dict[str, Any] | None:
     extras = _extras(data)
     # Fill in priority order -- the extras are the values a watcher looks for
     # first -- but write the result's own fields first, in the order it has them.
+    # A place name, a warning and a note together could fill the preview, so
+    # they leave room for a few headline numbers, shortening the last to fit.
     chosen: dict[str, Any] = {}
-    for key, value in [*extras.items(), *scalars.items()]:
-        if key in chosen:
-            continue
-        trial = {**chosen, key: value}
-        if len(json.dumps(trial, default=str)) <= PREVIEW_LIMIT:
-            chosen = trial
+    for key in sorted(extras, key=lambda k: k != "cached"):  # a flag costs nothing
+        value = _fitted(chosen, key, extras[key], PREVIEW_LIMIT - _SCALAR_ROOM)
+        if value is not None:
+            chosen[key] = value
+    for key, value in scalars.items():
+        if key not in chosen and _json_len({**chosen, key: value}) <= PREVIEW_LIMIT:
+            chosen[key] = value
     order = [*scalars, *(key for key in extras if key not in scalars)]
     return {key: chosen[key] for key in order if key in chosen}
+
+
+def _fitted(chosen: dict[str, Any], key: str, value: Any, limit: int) -> Any:
+    """``value``, shortened if it is text and has to be, so the preview fits ``limit``.
+
+    ``None`` when it cannot fit, or when what would fit is too short to read.
+    """
+    overflow = _json_len({**chosen, key: value}) - limit
+    if overflow <= 0:
+        return value
+    if not isinstance(value, str):
+        return None
+    # JSON escapes a non-ASCII character to six, so shorten until it fits.
+    room = len(value) - overflow
+    while room >= _SHORTEST_TEXT:
+        shorter = _clip(value, room)
+        if _json_len({**chosen, key: shorter}) <= limit:
+            return shorter
+        room -= 8
+    return None
+
+
+def _json_len(value: Any) -> int:
+    return len(json.dumps(value, default=str))
 
 
 def _structured(result: Any) -> dict[str, Any] | None:
@@ -172,12 +214,12 @@ def _extras(data: dict[str, Any]) -> dict[str, Any]:
             extras["match"] = _clip(name)
     warnings = data.get("warnings")
     if isinstance(warnings, list) and warnings and isinstance(warnings[0], str):
-        extras["warning"] = _clip(warnings[0])
+        extras["warning"] = _clip(warnings[0], _SENTENCE_LIMIT)
     meta = data.get("meta")
     if isinstance(meta, dict):
         notes = meta.get("notes")
         if isinstance(notes, list) and notes and isinstance(notes[0], str):
-            extras["note"] = _clip(notes[0])
+            extras["note"] = _clip(notes[0], _SENTENCE_LIMIT)
         if isinstance(meta.get("cached"), bool):
             extras["cached"] = meta["cached"]
     return extras
@@ -194,8 +236,22 @@ def _is_geometry_text(key: str) -> bool:
     return key == "output" or any(marker in key.lower() for marker in _GEOMETRY_TEXT)
 
 
-def _clip(value: Any) -> Any:
-    return value[:_TEXT_LIMIT] if isinstance(value, str) else value
+def _clip(value: Any, limit: int = _TEXT_LIMIT) -> Any:
+    """A string of at most ``limit`` characters, cut between words with an ellipsis.
+
+    A cut mid-word reads as a typo ("(1500-2000); tr") and hides where the
+    sentence was going. When no space falls in the second half of the string,
+    as in a long file name or URL, the cut is made at the limit instead. A cut
+    after a full stop keeps it, and a space, before the ellipsis.
+    """
+    if not isinstance(value, str) or len(value) <= limit:
+        return value
+    room = limit - len(" " + _ELLIPSIS)
+    head = value[: room + 1]  # one more character, to see whether a word ends at `room`
+    space = head.rfind(" ")
+    head = head[:space] if space > limit // 2 else head[:room]
+    head = head.rstrip(" ,;:-(")
+    return head + (" " if head.endswith(".") else "") + _ELLIPSIS
 
 
 def _append(target: Path, record: dict[str, Any]) -> None:
