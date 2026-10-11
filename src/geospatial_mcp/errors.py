@@ -28,7 +28,19 @@ __all__ = [
     "GeoRateLimited",
     "GeoUnavailable",
     "GeoUpstreamError",
+    "install_commands",
 ]
+
+#: Where the server installs from. The PyPI package named ``geospatial-mcp`` is
+#: an unrelated project, so an install command that gives only the package name
+#: would fetch that instead.
+INSTALL_SOURCE = "git+https://github.com/ystoneman/geospatial-mcp"
+
+
+def install_commands(extra: str) -> tuple[str, str]:
+    """The ``uvx`` and ``pip`` commands that install this server with ``extra``."""
+    requirement = f"'geospatial-mcp[{extra}] @ {INSTALL_SOURCE}'"
+    return f"uvx --from {requirement} geospatial-mcp", f"pip install {requirement}"
 
 
 class GeoError(Exception):
@@ -88,8 +100,8 @@ class GeoUnavailable(GeoError):
     """An optional dependency or dataset needed for this tool is not installed."""
 
     def __init__(self, feature: str, extra: str) -> None:
+        uvx, pip = install_commands(extra)
         super().__init__(
             f"{feature} requires the optional '{extra}' extra, which is not installed. "
-            f"Install it with:  uvx --with 'geospatial-mcp[{extra}]' geospatial-mcp   "
-            f"(or:  pip install 'geospatial-mcp[{extra}]')"
+            f"Install it with:  {uvx}   (or:  {pip})"
         )

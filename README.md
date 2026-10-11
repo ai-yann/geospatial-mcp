@@ -9,6 +9,10 @@ Built for logistics, telecom, agriculture, insurance, real estate, utilities,
 emergency response, surveying and mapping — anywhere a question starts with
 *where*.
 
+The package and command are `geospatial-mcp`, but install them from this
+repository: the PyPI package with that name is an unrelated project, and
+installing it will not give you this server.
+
 ```
 "How long to drive from the depot to the customer?"          route_directions
 "Everywhere a van can reach in 20 minutes"                   route_isochrone
@@ -21,13 +25,15 @@ emergency response, surveying and mapping — anywhere a question starts with
 
 ## Install
 
-Nothing to clone or build. Every client below runs the server with `uvx`.
+Nothing to clone by hand. Every client below runs the server with `uvx`,
+straight from this repository. To install it into an environment of your own
+instead, use `pip install git+https://github.com/ystoneman/geospatial-mcp`.
 
 <details open>
 <summary><b>Claude Code</b></summary>
 
 ```bash
-claude mcp add geospatial -- uvx geospatial-mcp
+claude mcp add geospatial -- uvx --from git+https://github.com/ystoneman/geospatial-mcp geospatial-mcp
 ```
 </details>
 
@@ -39,7 +45,7 @@ claude mcp add geospatial -- uvx geospatial-mcp
   "mcpServers": {
     "geospatial": {
       "command": "uvx",
-      "args": ["geospatial-mcp"]
+      "args": ["--from", "git+https://github.com/ystoneman/geospatial-mcp", "geospatial-mcp"]
     }
   }
 }
@@ -52,7 +58,7 @@ claude mcp add geospatial -- uvx geospatial-mcp
 ```toml
 [mcp_servers.geospatial]
 command = "uvx"
-args = ["geospatial-mcp"]
+args = ["--from", "git+https://github.com/ystoneman/geospatial-mcp", "geospatial-mcp"]
 ```
 </details>
 
@@ -64,7 +70,7 @@ args = ["geospatial-mcp"]
   "mcpServers": {
     "geospatial": {
       "command": "uvx",
-      "args": ["geospatial-mcp"]
+      "args": ["--from", "git+https://github.com/ystoneman/geospatial-mcp", "geospatial-mcp"]
     }
   }
 }
@@ -80,7 +86,7 @@ args = ["geospatial-mcp"]
     "geospatial": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["geospatial-mcp"]
+      "args": ["--from", "git+https://github.com/ystoneman/geospatial-mcp", "geospatial-mcp"]
     }
   }
 }
@@ -94,7 +100,7 @@ args = ["geospatial-mcp"]
 {
   "context_servers": {
     "geospatial": {
-      "command": { "path": "uvx", "args": ["geospatial-mcp"] }
+      "command": { "path": "uvx", "args": ["--from", "git+https://github.com/ystoneman/geospatial-mcp", "geospatial-mcp"] }
     }
   }
 }
@@ -158,7 +164,7 @@ Eiffel Tower, Paris      a place name, geocoded for you
 | `rf_link_budget` | Path-loss budget and cell radius | ● |
 | `rf_towers` | Known cell towers nearby | ○ |
 
-### `analysis` — 2 tools, opt-in (`pip install 'geospatial-mcp[stats]'`)
+### `analysis` — 2 tools, opt-in (the `stats` extra)
 
 | Tool | What it answers | Offline |
 |---|---|:--:|
@@ -180,11 +186,16 @@ standards and research this project leans on or points at.
 
 ### Selecting toolsets
 
+The examples call the command directly. If it is not installed, prefix it
+with `uvx --from git+https://github.com/ystoneman/geospatial-mcp`, as in the
+client configs above. `all` also needs the `stats` extra:
+`uvx --from 'geospatial-mcp[stats] @ git+https://github.com/ystoneman/geospatial-mcp' geospatial-mcp --toolsets all`.
+
 ```bash
-uvx geospatial-mcp --toolsets core       # 20 tools, drops the RF set
-uvx geospatial-mcp --toolsets all        # adds the analysis toolset (needs [stats])
-GEO_TOOLSETS=offline uvx geospatial-mcp  # 13 tools that never touch the network
-uvx geospatial-mcp --list-tools          # print the catalogue and exit
+geospatial-mcp --toolsets core       # 20 tools, drops the RF set
+geospatial-mcp --toolsets all        # adds the analysis toolset (needs [stats])
+GEO_TOOLSETS=offline geospatial-mcp  # 13 tools that never touch the network
+geospatial-mcp --list-tools          # print the catalogue and exit
 ```
 
 `offline` is for field use with no signal. It keeps only tools that make no

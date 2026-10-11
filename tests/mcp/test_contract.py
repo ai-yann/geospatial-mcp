@@ -311,6 +311,21 @@ class TestExtrasGating:
         message = str(exc.value)
         assert "stats" in message
         assert "pip install" in message, "the error must carry the command that fixes it"
+        assert "git+https://github.com/ystoneman/geospatial-mcp" in message
+
+    def test_install_commands_fetch_this_repository_not_the_pypi_name(self):
+        """The PyPI package named geospatial-mcp is an unrelated project."""
+        from packaging.requirements import Requirement
+
+        from geospatial_mcp.errors import GeoUnavailable, install_commands
+
+        uvx, pip = install_commands("stats")
+        requirement = Requirement(pip.removeprefix("pip install ").strip("'"))
+        assert requirement.name == "geospatial-mcp"
+        assert requirement.extras == {"stats"}
+        assert requirement.url == "git+https://github.com/ystoneman/geospatial-mcp"
+        assert uvx.startswith("uvx --from ") and uvx.endswith(" geospatial-mcp")
+        assert uvx in str(GeoUnavailable("Clustering", "stats"))
 
     def test_toolsets_without_an_extra_never_probe(self):
         from geospatial_mcp.tools import _require_extra

@@ -28,6 +28,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   after ten minutes, the lifetime meant for forecasts from the same host, so a
   terrain profile or line-of-sight check could not be fetched in advance.
 
+### Fixed
+
+- Install instructions, and the install commands in error messages about a
+  missing extra, fetch the server from this repository. The PyPI package named
+  `geospatial-mcp` is an unrelated project, so installing by that name ran
+  someone else's code. `server.json` no longer lists it as this server's PyPI
+  package.
+
 ## [0.1.0]
 
 First release.
@@ -40,8 +48,8 @@ First release.
   Desktop, OpenAI Codex CLI, Cursor, VS Code, Zed, Windsurf and Gemini CLI.
   Streamable HTTP is available with `--transport http` for self-hosting, and
   binds `127.0.0.1` unless the platform sets `PORT`.
-- Installable with `uvx geospatial-mcp` — no system packages, binary wheels on
-  Linux, macOS and Windows across x86-64 and ARM.
+- Installable with `uvx` from this repository — no system packages, binary
+  wheels on Linux, macOS and Windows across x86-64 and ARM.
 - Toolsets gated by `GEO_TOOLSETS` / `--toolsets`, with `default` (22 tools),
   `all`, and an `offline` preset of the 13 tools that make no network call.
 
