@@ -14,6 +14,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from the cache. Warnings and notes keep up to 200 characters, other text up
   to 100, and anything longer is cut between words and ends in an ellipsis.
   The whole preview is capped at 600 characters and never includes geometry.
+- `evals/harness.py` warns on stderr when the path of its work root
+  (`--work-root` or `GEO_EVALS_WORK_ROOT`) holds a word that could tell the
+  model what is being tested, such as `geospatial`, `mcp`, `eval`, `tool` or a
+  tool-name domain like `rf`, and records the words in `summary.json` as
+  `work_root_hint_words`. Claude Code shows the model its working directory. On
+  `telecom-cell-area-sum-007` with Sonnet 5.5 in October 2026, runs under
+  `/Users/Shared/geospatial-evals` called `rf_link_budget` and passed in 6 of 11
+  runs, and runs under neutral folders in 0 of 20. That is one case and one
+  model, so how far the effect reaches is not known. `evals/README.md` now
+  recommends a neutral work root such as `/Users/Shared/agent-runs`. The
+  default, `~/.cache/geospatial-evals`, carries the hint but is unchanged, so
+  that new runs compare with the Claude Code runs recorded under it in
+  September 2026, whose tool use the hint may have inflated.
 
 ### Changed
 

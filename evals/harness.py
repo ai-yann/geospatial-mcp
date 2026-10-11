@@ -10,9 +10,12 @@ running the harness answers it.
 Every run gets a fresh working directory and HOME, and a whitelisted
 environment: only the variables in ``PASSTHROUGH`` and ``PROVIDER_KEYS``
 reach the harness, so no ambient credential in the calling shell is used by
-accident. Both directories are made under the work root (``--work-root``):
-keep it outside your home folder, because Claude Code also reads the .claude/
-folder and CLAUDE.md of every directory above its working directory.
+accident. Both directories are made under the work root (``--work-root``).
+Keep it outside your home folder, because Claude Code also reads the .claude/
+folder and CLAUDE.md of every directory above its working directory. And give
+it a name that says nothing about the tools, because Claude Code shows the
+model its working directory: on one case, a folder named geospatial-evals
+changed whether the model used them (see :data:`HINT_WORDS`).
 
 Tool calls come from the server's own trace (``GEO_TRACE_FILE``), identical
 for every harness; the transcript supplies the final answer, the harness's
@@ -21,7 +24,7 @@ own tool use (shell, web) and cost.
     uv run python evals/harness.py --harness opencode --model opencode/<model>
     uv run python evals/harness.py --harness claude-code --condition builtin --filter demo
     uv run python evals/harness.py --harness codex --model <model> --repeat 3
-    uv run python evals/harness.py --harness claude-code --work-root /Users/Shared/geospatial-evals
+    uv run python evals/harness.py --harness claude-code --work-root /Users/Shared/agent-runs
     uv run python evals/harness.py --report evals/results/harness-*
 
 Conditions:
@@ -38,6 +41,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -100,7 +104,9 @@ SERVER_MARKERS = ("geospatial_mcp", "geospatial-mcp", "mcp-geospatial")
 #: Where each run's working directory and HOME are made, unless --work-root or
 #: GEO_EVALS_WORK_ROOT says otherwise. Not under /tmp: Codex refuses to install
 #: its helper binaries there. It is inside the home folder, which a harness can
-#: see from below; see :func:`inherited_agent_config`.
+#: see from below (see :func:`inherited_agent_config`), and its name carries
+#: "geospatial" and "evals", which the model sees (see :func:`work_root_hint_words`).
+#: It stays the default so that new runs compare with the ones recorded under it.
 DEFAULT_WORK_ROOT = Path.home() / ".cache" / "geospatial-evals"
 
 #: The variable that moves the work root without a command-line flag.
@@ -117,6 +123,52 @@ AGENT_CONFIG = (
     ".opencode",
     "opencode.json",
 )
+
+#: Words in the work root's path that could tell the model what is being tested.
+#: Claude Code shows the model its working directory. On one case
+#: (telecom-cell-area-sum-007, claude-sonnet-5-5 at medium effort, October 2026)
+#: runs under /Users/Shared/geospatial-evals called rf_link_budget and passed in
+#: 6 of 11 runs, and runs under neutral folders in 0 of 20. The word that differed
+#: was "geospatial": two of the neutral folders were named evals-neutral and
+#: eval-scratch. The other words are flagged as a precaution.
+HINT_WORDS = (
+    "geospatial",
+    "spatial",
+    "gis",
+    "geo",
+    "mcp",
+    "eval",
+    "evals",
+    "evaluation",
+    "evaluations",
+    "tool",
+    "tools",
+)
+
+#: The domains this server's tool names start with, as in rf_link_budget (the
+#: naming convention in tests/mcp/test_contract.py). A folder called rf-runs
+#: hints as much as one called geospatial. "data" and "env" are left out: they
+#: name ordinary folders (/data, a virtualenv's env), and a warning that fires
+#: on those would be ignored.
+TOOL_PREFIXES = (
+    "geo",
+    "coord",
+    "geom",
+    "place",
+    "route",
+    "terrain",
+    "sun",
+    "time",
+    "rf",
+    "orbit",
+    "hazard",
+    "track",
+    "stats",
+    "raster",
+)
+
+#: A work root with none of those words in it.
+NEUTRAL_WORK_ROOT_EXAMPLE = "/Users/Shared/agent-runs"
 
 
 # ---------------------------------------------------------------- run layout
@@ -177,7 +229,7 @@ def inherited_agent_config(work_root: Path) -> list[Path]:
     All 108 Claude Code runs recorded in September 2026 worked under
     ~/.cache/geospatial-evals, and every one listed the operator's personal
     skills and agents from ~/.claude in its init event. A work root outside
-    the home folder, such as /Users/Shared/geospatial-evals, has none above it.
+    the home folder, such as /Users/Shared/agent-runs, has none above it.
     """
     start = work_root.expanduser().absolute()
     return [
@@ -198,10 +250,52 @@ def warn_about_inherited_config(work_root: Path) -> list[Path]:
             f"{listed}\n"
             "Claude Code loads the skills, agents and CLAUDE.md it finds there into every run. "
             f"Use --work-root or {WORK_ROOT_ENV} to work outside the home folder, "
-            "e.g. /Users/Shared/geospatial-evals.",
+            f"e.g. {NEUTRAL_WORK_ROOT_EXAMPLE}.",
             file=sys.stderr,
         )
     return found
+
+
+def _words(component: str) -> list[str]:
+    """Split one path component into lower-case words: geospatial-evals and
+    GeoEvals both give two, MCPServer gives mcp and server."""
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", component)
+    return [word for word in re.split(r"[^a-z0-9]+", spaced.lower()) if word]
+
+
+def work_root_hint_words(work_root: Path) -> list[str]:
+    """Words in ``work_root``'s path that could hint at the tools being tested.
+
+    Only whole words count, so a folder named george or medieval is not
+    flagged. Below the work root the harness adds only run-<random>/work.
+    """
+    hints = {*HINT_WORDS, *TOOL_PREFIXES}
+    path = work_root.expanduser().absolute()
+    found = (word for part in path.parts for word in _words(part) if word in hints)
+    return list(dict.fromkeys(found))
+
+
+def warn_about_hint_words(work_root: Path) -> list[str]:
+    """Say on stderr when the work root's name could hint at the tools being tested."""
+    words = work_root_hint_words(work_root)
+    if words:
+        listed = ", ".join(f'"{word}"' for word in words)
+        if work_root.expanduser().absolute() == DEFAULT_WORK_ROOT.absolute():
+            default = "This is the default work root."
+        else:
+            default = f"The default work root, {DEFAULT_WORK_ROOT}, has the hint too."
+        print(
+            f"warning: the work root {work_root} contains {listed}, which could tell the model "
+            "what is being tested.\n"
+            "Claude Code shows the model its working directory. On one case with Sonnet 5.5 "
+            "(October 2026), runs under /Users/Shared/geospatial-evals used the expected tool "
+            "in 6 of 11 runs, and runs under neutral folders in 0 of 20.\n"
+            f"{default} It stays the default so that new runs compare with those recorded under it. "
+            f"To measure without the hint, use --work-root or {WORK_ROOT_ENV} with a neutral "
+            f"name, e.g. {NEUTRAL_WORK_ROOT_EXAMPLE}.",
+            file=sys.stderr,
+        )
+    return words
 
 
 def inside_git_repo(path: Path) -> Path | None:
@@ -807,7 +901,9 @@ def build_parser() -> argparse.ArgumentParser:
             f"Where each run's working directory and HOME are made (default: ${WORK_ROOT_ENV}, "
             f"else {DEFAULT_WORK_ROOT}). Must be outside any git repository, and should be "
             "outside the home folder: Claude Code loads the .claude/ and CLAUDE.md of every "
-            "directory above its working directory. E.g. /Users/Shared/geospatial-evals."
+            "directory above its working directory. Its name should say nothing about the "
+            "tools, since the model sees its working directory. "
+            f"E.g. {NEUTRAL_WORK_ROOT_EXAMPLE}."
         ),
     )
     parser.add_argument("--out", type=Path, default=None, help="Results directory.")
@@ -891,6 +987,7 @@ def main() -> int:
     print(f"{len(cases)} case(s) x {args.repeat} in {label} -> {out}")
     # Recorded with the results, so a reader can tell whether the runs could see it.
     inherited = [str(path) for path in warn_about_inherited_config(args.work_root)]
+    hint_words = warn_about_hint_words(args.work_root)
 
     records = []
     done: set[tuple[str, int]] = set()
@@ -941,6 +1038,7 @@ def main() -> int:
                 "label": label,
                 "args": _jsonable(vars(args)),
                 "inherited_agent_config": inherited,
+                "work_root_hint_words": hint_words,
                 "summary": summary,
             },
             indent=2,

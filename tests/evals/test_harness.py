@@ -335,3 +335,94 @@ class TestWorkRoot:
         assert str(tmp_path / ".claude") in err
         assert "--work-root" in err
         assert harness.WORK_ROOT_ENV in err
+
+
+class TestWorkRootName:
+    """The model sees its working directory, and the folder's name can hint at the tools.
+
+    On telecom-cell-area-sum-007 with Sonnet 5.5 (October 2026), runs under
+    /Users/Shared/geospatial-evals called rf_link_budget in 6 of 11 runs, and
+    runs under neutral folders in 0 of 20.
+    """
+
+    @pytest.mark.parametrize(
+        ("path", "words"),
+        [
+            ("/Users/Shared/geospatial-evals", ["geospatial", "evals"]),
+            ("/Users/Shared/GeoEvals", ["geo", "evals"]),
+            ("/srv/MCPServer/runs", ["mcp"]),
+            ("/Users/Shared/tool_tests", ["tool"]),
+            ("/Users/Shared/rf-runs", ["rf"]),  # a prefix of the server's tool names
+        ],
+    )
+    def test_a_hinting_path_is_flagged(self, path, words):
+        assert harness.work_root_hint_words(Path(path)) == words
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/Users/Shared/agent-runs",
+            "/srv/medieval/george",  # only whole words count
+            "/data/runs",  # data_convert's prefix, but an ordinary folder name
+        ],
+    )
+    def test_a_neutral_path_is_not_flagged(self, path):
+        assert harness.work_root_hint_words(Path(path)) == []
+
+    def test_the_default_carries_the_hint(self):
+        assert "geospatial" in harness.work_root_hint_words(harness.DEFAULT_WORK_ROOT)
+
+    def test_the_recommended_example_is_neutral(self):
+        assert harness.work_root_hint_words(Path(harness.NEUTRAL_WORK_ROOT_EXAMPLE)) == []
+
+    def test_every_tool_domain_in_the_library_is_a_hint(self):
+        """Kept in step with the tools the cases name, bar the two ordinary folder names."""
+        named = {
+            tool
+            for case in harness.load_cases(None, include_network=True)
+            for key in ("expect_tools", "optional_tools", "forbid_tools")
+            for tool in case.get(key, [])
+        }
+        domains = {tool.split("_")[0] for tool in named} - {"data", "env"}
+        assert domains <= set(harness.TOOL_PREFIXES)
+
+    def test_a_hinting_work_root_is_warned_about(self, capsys):
+        words = harness.warn_about_hint_words(Path("/Users/Shared/geospatial-evals"))
+        err = capsys.readouterr().err
+        assert words == ["geospatial", "evals"]
+        assert '"geospatial", "evals"' in err
+        assert "--work-root" in err
+        assert harness.WORK_ROOT_ENV in err
+        assert harness.NEUTRAL_WORK_ROOT_EXAMPLE in err
+        # It says the default has the hint too, rather than only blaming the flag.
+        assert str(harness.DEFAULT_WORK_ROOT) in err
+
+    def test_the_default_is_warned_about_as_the_default(self, capsys):
+        harness.warn_about_hint_words(harness.DEFAULT_WORK_ROOT)
+        assert "This is the default work root." in capsys.readouterr().err
+
+    def test_a_neutral_work_root_is_not_warned_about(self, capsys):
+        assert harness.warn_about_hint_words(Path("/Users/Shared/agent-runs")) == []
+        assert capsys.readouterr().err == ""
+
+    @pytest.mark.parametrize(
+        ("folder", "hinted"), [("geospatial-evals", True), ("agent-runs", False)]
+    )
+    def test_summary_records_the_words(self, tmp_path, monkeypatch, capsys, folder, hinted):
+        """A reader of the results can tell whether the runs' path carried a hint."""
+        monkeypatch.setitem(harness.ADAPTERS, _WhereAmI.name, _WhereAmI)
+        work_root = tmp_path / folder
+        out = tmp_path / "results"
+        argv = ["harness.py", "--harness", _WhereAmI.name, "--condition", "builtin"]
+        argv += ["--prompt", "Where are you?", "--out", str(out), "--work-root", str(work_root)]
+        monkeypatch.setattr(sys, "argv", argv)
+
+        assert harness.main() == 0
+
+        recorded = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+        words = recorded["work_root_hint_words"]
+        # Compared with the function, not with [], so a temporary folder whose own
+        # path happens to hold a hint word does not fail the neutral case.
+        assert words == harness.work_root_hint_words(work_root)
+        assert ("geospatial" in words) is hinted
+        assert ("could tell the model" in capsys.readouterr().err) is bool(words)

@@ -23,9 +23,9 @@ the other two cannot: a model skipping this server to do the maths itself.
 
 ```bash
 # Real harnesses. Each run gets a fresh HOME and only whitelisted variables,
-# so no ambient credential is used by accident. Work outside your home folder
-# (see "Where runs work" below).
-export GEO_EVALS_WORK_ROOT=/Users/Shared/geospatial-evals
+# so no ambient credential is used by accident. Work outside your home folder,
+# in a folder whose name says nothing about the tools (see "Where runs work").
+export GEO_EVALS_WORK_ROOT=/Users/Shared/agent-runs
 uv run python evals/harness.py --harness opencode --model opencode/<model> --filter demo
 uv run python evals/harness.py --harness claude-code --condition builtin --repeat 3
 uv run python evals/harness.py --harness codex --model <model>
@@ -43,19 +43,51 @@ Each run's working directory and HOME are made in a fresh directory under the
 work root. Set it with `--work-root` (formerly `--scratch`, which still works)
 or `GEO_EVALS_WORK_ROOT`. The default is `~/.cache/geospatial-evals`.
 
-Use a work root outside your home folder, such as
-`/Users/Shared/geospatial-evals` on macOS. Claude Code reads the `.claude/`
-folder and the `CLAUDE.md` of every directory above its working directory,
-whatever `HOME` is set to. With the default, it finds your own `~/.claude`,
-and every run gets your personal skills, agents and instructions. Those are
-not part of the setup being measured, and they differ from one machine to the
-next.
+Use a work root outside your home folder, with a name that says nothing about
+the tools, the server or the subject, such as `/Users/Shared/agent-runs` on
+macOS. Two things about it reach the model: what is above it, and its name.
+
+**What is above it.** Claude Code reads the `.claude/` folder and the
+`CLAUDE.md` of every directory above its working directory, whatever `HOME` is
+set to. Under the home folder it finds your own `~/.claude`, and every run gets
+your personal skills, agents and instructions. Those are not part of the setup
+being measured, and they differ from one machine to the next.
 
 The harness prints a warning when it finds `.claude`, `CLAUDE.md`,
 `CLAUDE.local.md`, `AGENTS.md`, `.opencode` or `opencode.json` in the work
 root or any directory above it. It also lists them in the results'
 `summary.json`, under `inherited_agent_config`. The work root must also be
 outside any git repository; the harness refuses to run inside one.
+
+**Its name.** Claude Code shows the model its working directory, and on one
+case the folder's name decided whether the model used this server. In October
+2026 we ran `telecom-cell-area-sum-007` in Claude Code 2.1.296 with
+`claude-sonnet-5-5` at medium effort, the server connected in every run, and
+changed only the work root:
+
+| Work root | Runs | Called `rf_link_budget` and passed |
+|---|---|---|
+| `/Users/Shared/geospatial-evals` | 11 | 6 |
+| `/Users/Shared/evals-neutral` and two folders named `eval-scratch` | 20 | 0 |
+
+Every failing run estimated the area by hand, with no tool call. Six of 11
+against none of 20 is unlikely to be chance (Fisher's exact test, p < 0.001),
+but it is one case, one model and 31 runs. It shows that a folder name can
+decide whether the tools are used at all; it does not say how far the name
+moves any other case, model or harness. The neutral folders had "eval" and
+"evals" in them, so the word that made the difference here was "geospatial".
+
+The harness warns on stderr when any part of the work root's path contains a
+word that could hint at what is being tested: `geospatial`, `spatial`, `gis`,
+`geo`, `mcp`, `eval`, `evals`, `evaluation`, `tool` or `tools`, or a domain
+that starts this server's tool names, such as `rf`, `coord` or `terrain` (but
+not `data` or `env`, which name ordinary folders). Only whole words count, so
+`george` does not. It lists them in `summary.json` under `work_root_hint_words`.
+
+The default work root carries the hint: `~/.cache/geospatial-evals` contains
+"geospatial" and "evals". It stays the default so that new runs compare with
+those recorded under it, and the harness warns when it is used. Pass a neutral
+`--work-root` to measure without the hint.
 
 ## Coverage axes
 
@@ -116,12 +148,20 @@ made in October 2026:
   working directory and log "Failed to write last message file", and the final
   answer was then taken from the last agent message instead.
 
-They also predate `--work-root`. All 108 Claude Code runs in `results/` (the
-`cc-*` directories) worked under `~/.cache/geospatial-evals`, and the init
-event of every one lists the operator's own skills and agents from
-`~/.claude`. Claude Code very probably loaded `~/.claude/CLAUDE.md` as
-instructions too, though the transcripts do not record which instruction
-files it read. Read those results with that in mind.
+They also predate `--work-root`. All 108 Claude Code runs recorded in
+September 2026 (the `cc-*` directories in `results/`) worked under
+`~/.cache/geospatial-evals`, and the init event of every one lists the
+operator's own skills and agents from `~/.claude`. Claude Code very probably
+loaded `~/.claude/CLAUDE.md` as instructions too, though the transcripts do
+not record which instruction files it read.
+
+That folder's name also carries "geospatial" (see "Where runs work"), so the
+with-server tool use and pass rates of those runs may be higher than a neutral
+folder would give. This was measured for Sonnet 5.5 on one case only; the
+September runs used Sonnet 5 and Opus 5.5, and were not repeated under a
+neutral folder. The Codex and opencode runs in `results/` worked under the same
+folder, and the effect was not measured for those harnesses. Read all of those
+results with this in mind.
 
 ## Scoring
 
