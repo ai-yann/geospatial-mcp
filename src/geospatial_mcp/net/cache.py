@@ -30,6 +30,7 @@ TTL_BY_HOST: dict[str, float] = {
     "overpass-api.de": 900.0,
     "valhalla1.openstreetmap.de": 7 * 86400.0,
     "api.openrouteservice.org": 7 * 86400.0,
+    # Forecasts. Elevation shares this host and sets its own lifetime per request.
     "api.open-meteo.com": 600.0,
     "archive-api.open-meteo.com": 30 * 86400.0,
     "air-quality-api.open-meteo.com": 1800.0,

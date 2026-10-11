@@ -17,6 +17,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `stats_cluster` (DBSCAN) radii. A model that converted 7.5 km to 0.0674 and
   sent it as metres got a 7 cm buffer, or an empty search reported as an
   absence of data. The error now says what happened and how to fix it.
+- Open-Meteo elevation responses are cached for a year. They used to expire
+  after ten minutes, the lifetime meant for forecasts from the same host, so a
+  terrain profile or line-of-sight check could not be fetched in advance.
 
 ## [0.1.0]
 
