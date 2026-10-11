@@ -44,6 +44,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   server from this repository. They named a PyPI package, but the server is
   not on PyPI, and the PyPI package named `geospatial-mcp` is an unrelated
   project. `server.json` no longer lists a PyPI package for the same reason.
+- `coord_transform_crs` reports a change of projection or axis order with no
+  datum transformation (EPSG:4326 to EPSG:3857, say) as exact on every PROJ.
+  PROJ 9.8, which pyproj 3.8 bundles and a fresh install resolves, publishes
+  no accuracy for these operations, so the tool said the accuracy was unknown.
+  An operation with any datum transformation step, a ballpark offset included,
+  is never counted as exact.
 
 ## [0.1.0]
 

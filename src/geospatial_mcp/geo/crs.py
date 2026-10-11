@@ -109,6 +109,11 @@ def transform_point(
     accuracy = getattr(operation, "accuracy", None)
     if accuracy is not None and accuracy < 0:
         accuracy = None
+    if accuracy is None and operation is not None and _is_conversion_only(operation):
+        # A change of projection or axis order with no datum transformation is
+        # exact by definition. PROJ 9.5 publishes 0 for it; PROJ 9.8 wraps the
+        # same steps in an axis-order normalisation that publishes no accuracy.
+        accuracy = 0.0
     # The diagnostics locate the point by longitude/latitude, which assumes x/y
     # axis order. Rather than guess at a lat-first caller's intent, skip them.
     better_accuracy, missing = (
@@ -148,6 +153,25 @@ def _last_operation(transformer: Transformer) -> object | None:
     except Exception:
         # PROJ raises when no operation ran -- e.g. the point was rejected.
         return None
+
+
+def _is_conversion_only(operation: object) -> bool:
+    """True when every step is a conversion, so no datum is changed.
+
+    A conversion (a projection, its inverse, an axis swap, a unit change) is
+    mathematically defined. Moving between datums takes a transformation step,
+    and PROJ's ballpark offsets are transformation steps too, so an operation
+    with even one of them is never treated as exact here.
+    """
+    steps = getattr(operation, "operations", None)
+    if steps:
+        return all(getattr(step, "type_name", None) == "Conversion" for step in steps)
+    # A single-step operation lists no steps of its own; its JSON names its type.
+    try:
+        kind = operation.to_json_dict().get("type")  # type: ignore[attr-defined]
+    except Exception:
+        return False
+    return bool(kind == "Conversion")
 
 
 def _grids_of(operation: object) -> list[str]:
