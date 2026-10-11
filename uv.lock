@@ -791,116 +791,6 @@ wheels = [
 ]
 
 [[package]]
-name = "geospatial-mcp"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "astral" },
-    { name = "geohashr" },
-    { name = "geojson-pydantic" },
-    { name = "h3" },
-    { name = "mcp" },
-    { name = "mercantile" },
-    { name = "numpy" },
-    { name = "pluscodes" },
-    { name = "polyline" },
-    { name = "pydantic" },
-    { name = "pygeodesy" },
-    { name = "pyproj" },
-    { name = "pyshp" },
-    { name = "shapely" },
-    { name = "tzfpy" },
-]
-
-[package.optional-dependencies]
-optimize = [
-    { name = "fast-tsp" },
-]
-orbit = [
-    { name = "sgp4" },
-    { name = "skyfield" },
-]
-raster = [
-    { name = "morecantile" },
-    { name = "pystac-client" },
-    { name = "rasterio", version = "1.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "rasterio", version = "1.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "rio-tiler" },
-]
-render = [
-    { name = "pillow" },
-    { name = "staticmap" },
-]
-stats = [
-    { name = "esda", version = "2.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "esda", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "libpysal", version = "4.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "libpysal", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "scikit-learn" },
-]
-terrain = [
-    { name = "pillow" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "hypothesis" },
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "pyyaml" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "astral", specifier = ">=3.2" },
-    { name = "esda", marker = "python_full_version >= '3.12' and extra == 'stats'", specifier = ">=2.10" },
-    { name = "esda", marker = "python_full_version < '3.12' and extra == 'stats'", specifier = ">=2.9,<2.10" },
-    { name = "fast-tsp", marker = "extra == 'optimize'", specifier = ">=0.1.5" },
-    { name = "geohashr", specifier = ">=1.6" },
-    { name = "geojson-pydantic", specifier = ">=2.1" },
-    { name = "h3", specifier = ">=4.5" },
-    { name = "libpysal", marker = "python_full_version >= '3.12' and extra == 'stats'", specifier = ">=4.15" },
-    { name = "libpysal", marker = "python_full_version < '3.12' and extra == 'stats'", specifier = ">=4.12,<4.15" },
-    { name = "mcp", specifier = ">=2.0,<3" },
-    { name = "mercantile", specifier = ">=1.2" },
-    { name = "morecantile", marker = "extra == 'raster'", specifier = ">=5.0" },
-    { name = "numpy", specifier = ">=2.0" },
-    { name = "pillow", marker = "extra == 'render'", specifier = ">=11" },
-    { name = "pillow", marker = "extra == 'terrain'", specifier = ">=11" },
-    { name = "pluscodes", specifier = ">=2022.1.3" },
-    { name = "polyline", specifier = ">=2.0" },
-    { name = "pydantic", specifier = ">=2.12" },
-    { name = "pygeodesy", specifier = ">=26.8" },
-    { name = "pyproj", specifier = ">=3.7" },
-    { name = "pyshp", specifier = ">=3.1" },
-    { name = "pystac-client", marker = "extra == 'raster'", specifier = ">=0.8" },
-    { name = "rasterio", marker = "python_full_version >= '3.12' and extra == 'raster'", specifier = ">=1.5" },
-    { name = "rasterio", marker = "python_full_version < '3.12' and extra == 'raster'", specifier = ">=1.4,<1.5" },
-    { name = "rio-tiler", marker = "extra == 'raster'", specifier = ">=7.0" },
-    { name = "scikit-learn", marker = "extra == 'stats'", specifier = ">=1.5" },
-    { name = "sgp4", marker = "extra == 'orbit'", specifier = ">=2.27" },
-    { name = "shapely", specifier = ">=2.1" },
-    { name = "skyfield", marker = "extra == 'orbit'", specifier = ">=1.55" },
-    { name = "staticmap", marker = "extra == 'render'", specifier = ">=0.5.7" },
-    { name = "tzfpy", specifier = ">=1.3" },
-]
-provides-extras = ["terrain", "orbit", "stats", "optimize", "render", "raster"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "hypothesis", specifier = ">=6.120" },
-    { name = "mypy", specifier = ">=1.14" },
-    { name = "pytest", specifier = ">=8.3" },
-    { name = "pytest-asyncio", specifier = ">=0.25" },
-    { name = "pytest-cov", specifier = ">=6.0" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "ruff", specifier = ">=0.9" },
-]
-
-[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1418,6 +1308,116 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/74/33/32d4dff2c95bb5d897c3ef4c83649a08996b17b58f0a326d2495d4c81179/mcp-2.0.0.tar.gz", hash = "sha256:0f440e735c13ece8bb19bc62cf0b86f4313448432fbb77d35e14034f4e050728", size = 1662284, upload-time = "2026-07-28T13:45:32.346Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/67/72/7d7897418912c1d12e87556630dfb7bf0eac71160e9bef8b447960804ee3/mcp-2.0.0-py3-none-any.whl", hash = "sha256:1cb4c75d2d2c7b8c1d756355e5d82a39f2822cc7f13e22a2051d7ca3592349d6", size = 349980, upload-time = "2026-07-28T13:45:28.853Z" },
+]
+
+[[package]]
+name = "mcp-geospatial"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "astral" },
+    { name = "geohashr" },
+    { name = "geojson-pydantic" },
+    { name = "h3" },
+    { name = "mcp" },
+    { name = "mercantile" },
+    { name = "numpy" },
+    { name = "pluscodes" },
+    { name = "polyline" },
+    { name = "pydantic" },
+    { name = "pygeodesy" },
+    { name = "pyproj" },
+    { name = "pyshp" },
+    { name = "shapely" },
+    { name = "tzfpy" },
+]
+
+[package.optional-dependencies]
+optimize = [
+    { name = "fast-tsp" },
+]
+orbit = [
+    { name = "sgp4" },
+    { name = "skyfield" },
+]
+raster = [
+    { name = "morecantile" },
+    { name = "pystac-client" },
+    { name = "rasterio", version = "1.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "rasterio", version = "1.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "rio-tiler" },
+]
+render = [
+    { name = "pillow" },
+    { name = "staticmap" },
+]
+stats = [
+    { name = "esda", version = "2.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "esda", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "libpysal", version = "4.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "libpysal", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "scikit-learn" },
+]
+terrain = [
+    { name = "pillow" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "hypothesis" },
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "pyyaml" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "astral", specifier = ">=3.2" },
+    { name = "esda", marker = "python_full_version >= '3.12' and extra == 'stats'", specifier = ">=2.10" },
+    { name = "esda", marker = "python_full_version < '3.12' and extra == 'stats'", specifier = ">=2.9,<2.10" },
+    { name = "fast-tsp", marker = "extra == 'optimize'", specifier = ">=0.1.5" },
+    { name = "geohashr", specifier = ">=1.6" },
+    { name = "geojson-pydantic", specifier = ">=2.1" },
+    { name = "h3", specifier = ">=4.5" },
+    { name = "libpysal", marker = "python_full_version >= '3.12' and extra == 'stats'", specifier = ">=4.15" },
+    { name = "libpysal", marker = "python_full_version < '3.12' and extra == 'stats'", specifier = ">=4.12,<4.15" },
+    { name = "mcp", specifier = ">=2.0,<3" },
+    { name = "mercantile", specifier = ">=1.2" },
+    { name = "morecantile", marker = "extra == 'raster'", specifier = ">=5.0" },
+    { name = "numpy", specifier = ">=2.0" },
+    { name = "pillow", marker = "extra == 'render'", specifier = ">=11" },
+    { name = "pillow", marker = "extra == 'terrain'", specifier = ">=11" },
+    { name = "pluscodes", specifier = ">=2022.1.3" },
+    { name = "polyline", specifier = ">=2.0" },
+    { name = "pydantic", specifier = ">=2.12" },
+    { name = "pygeodesy", specifier = ">=26.8" },
+    { name = "pyproj", specifier = ">=3.7" },
+    { name = "pyshp", specifier = ">=3.1" },
+    { name = "pystac-client", marker = "extra == 'raster'", specifier = ">=0.8" },
+    { name = "rasterio", marker = "python_full_version >= '3.12' and extra == 'raster'", specifier = ">=1.5" },
+    { name = "rasterio", marker = "python_full_version < '3.12' and extra == 'raster'", specifier = ">=1.4,<1.5" },
+    { name = "rio-tiler", marker = "extra == 'raster'", specifier = ">=7.0" },
+    { name = "scikit-learn", marker = "extra == 'stats'", specifier = ">=1.5" },
+    { name = "sgp4", marker = "extra == 'orbit'", specifier = ">=2.27" },
+    { name = "shapely", specifier = ">=2.1" },
+    { name = "skyfield", marker = "extra == 'orbit'", specifier = ">=1.55" },
+    { name = "staticmap", marker = "extra == 'render'", specifier = ">=0.5.7" },
+    { name = "tzfpy", specifier = ">=1.3" },
+]
+provides-extras = ["terrain", "orbit", "stats", "optimize", "render", "raster"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "hypothesis", specifier = ">=6.120" },
+    { name = "mypy", specifier = ">=1.14" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "pytest-asyncio", specifier = ">=0.25" },
+    { name = "pytest-cov", specifier = ">=6.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "ruff", specifier = ">=0.9" },
 ]
 
 [[package]]

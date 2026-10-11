@@ -8,6 +8,6 @@
 builder = "DOCKERFILE"
 
 [deploy]
-startCommand = "geospatial-mcp --transport http"
+startCommand = "mcp-geospatial --transport http"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10

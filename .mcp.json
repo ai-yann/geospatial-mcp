@@ -2,7 +2,7 @@
   "mcpServers": {
     "geospatial": {
       "command": "uv",
-      "args": ["run", "--directory", ".", "geospatial-mcp", "--transport", "stdio"],
+      "args": ["run", "--directory", ".", "mcp-geospatial", "--transport", "stdio"],
       "env": {
         "GEO_TOOLSETS": "all"
       }

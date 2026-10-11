@@ -3,7 +3,7 @@
     "geospatial": {
       "type": "stdio",
       "command": "uv",
-      "args": ["run", "--directory", "${workspaceFolder}", "geospatial-mcp"]
+      "args": ["run", "--directory", "${workspaceFolder}", "mcp-geospatial"]
     }
   }
 }

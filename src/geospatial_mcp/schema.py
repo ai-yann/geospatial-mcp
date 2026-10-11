@@ -2,7 +2,7 @@
 
 Every tool's schema is re-sent on every turn, so schema size is a recurring
 tax on the context window rather than a one-off cost. Pydantic generates
-correct but verbose schemas; three things in them carry no information a model
+correct but verbose schemas; five things in them carry no information a model
 can use:
 
 1. **Auto-generated ``title`` keys.** Pydantic emits ``"title": "Distance M"``
@@ -13,14 +13,21 @@ can use:
 3. **Verbose ``anyOf`` null unions.** ``{"anyOf": [{"type": "number"},
    {"type": "null"}]}`` collapses to ``{"type": ["number", "null"]}``, which is
    equivalent in JSON Schema and roughly half the length.
+4. **Docstring indentation.** The SDK uses the raw docstring as the tool
+   description, so every continuation line arrives with the eight spaces of
+   source indentation in front of it. Unlike output schemas, descriptions reach
+   the model in every client.
+5. **The ``ResponseMeta`` definition**, repeated verbatim in all 22 output
+   schemas. The server instructions describe ``meta`` once instead.
 
-Measured on this server's 22 default tools, this cuts ``tools/list`` from about
-79 KB to about 48 KB with no loss of meaning. Field ``description`` text is
-never touched -- that is the part the model actually needs.
+Measured on the 22 default tools, this cuts ``tools/list`` from about 78 KB to
+40 KB. Field ``description`` text is never reworded -- that is the part the
+model actually needs.
 """
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 __all__ = ["schema_size", "slim_schema", "slim_server_schemas"]
@@ -28,8 +35,8 @@ __all__ = ["schema_size", "slim_schema", "slim_server_schemas"]
 #: Keys safe to drop wholesale.
 _DROP_KEYS = frozenset({"title", "additionalProperties"})
 
-#: Definitions repeated verbatim in every tool's ``$defs``. Their descriptions
-#: are stated once in the server instructions instead of once per tool here.
+#: Definitions repeated verbatim in every tool's ``$defs``. The server
+#: instructions explain them once, so each copy is reduced to a bare object.
 _BOILERPLATE_DEFS = frozenset({"ResponseMeta"})
 
 
@@ -81,27 +88,28 @@ def _as_mcp_tools(server: Any) -> list[Any]:
     return asyncio.run(server.list_tools())
 
 
-def _strip_boilerplate_descriptions(schema: dict[str, Any]) -> dict[str, Any]:
-    """Drop prose from definitions that appear in every tool's schema."""
+def _collapse_boilerplate_defs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Reduce definitions that appear in every tool's schema to a bare object.
+
+    The ``$ref`` pointing at each one is kept, so the output schema still
+    validates the same responses; it just stops spelling out the same six
+    fields 22 times.
+    """
     defs = schema.get("$defs")
     if not isinstance(defs, dict):
         return schema
     for name in _BOILERPLATE_DEFS:
-        definition = defs.get(name)
-        if not isinstance(definition, dict):
-            continue
-        definition.pop("description", None)
-        for prop in (definition.get("properties") or {}).values():
-            if isinstance(prop, dict):
-                prop.pop("description", None)
-                prop.pop("default", None)
+        if name in defs:
+            defs[name] = {"type": "object"}
     return schema
 
 
 def slim_server_schemas(server: Any) -> None:
     """Apply :func:`slim_schema` to every registered tool, in place."""
     for tool in server._tool_manager.list_tools():
+        if getattr(tool, "description", None):
+            tool.description = inspect.cleandoc(tool.description)
         if getattr(tool, "parameters", None):
             tool.parameters = slim_schema(tool.parameters)
         if getattr(tool, "output_schema", None):
-            tool.output_schema = _strip_boilerplate_descriptions(slim_schema(tool.output_schema))
+            tool.output_schema = _collapse_boilerplate_defs(slim_schema(tool.output_schema))

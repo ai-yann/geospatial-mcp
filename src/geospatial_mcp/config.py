@@ -42,11 +42,11 @@ def default_cache_dir() -> Path:
     """Return the platform cache directory without taking a platformdirs dep."""
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
-        return Path(base) / "geospatial-mcp" / "Cache"
+        return Path(base) / "mcp-geospatial" / "Cache"
     xdg = os.environ.get("XDG_CACHE_HOME")
     if xdg:
-        return Path(xdg) / "geospatial-mcp"
-    return Path.home() / ".cache" / "geospatial-mcp"
+        return Path(xdg) / "mcp-geospatial"
+    return Path.home() / ".cache" / "mcp-geospatial"
 
 
 @dataclass(frozen=True)
@@ -93,7 +93,7 @@ class Settings:
             return (e.get(key) or _DEFAULTS[key]).rstrip("/")
 
         ua = e.get("GEO_USER_AGENT") or (
-            f"geospatial-mcp/{__version__} (+https://github.com/ystoneman/geospatial-mcp)"
+            f"mcp-geospatial/{__version__} (+https://github.com/ystoneman/geospatial-mcp)"
         )
         cache_dir = Path(e["GEO_CACHE_DIR"]) if e.get("GEO_CACHE_DIR") else default_cache_dir()
         return cls(

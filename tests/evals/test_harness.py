@@ -241,7 +241,7 @@ class TestEnvironment:
         assert trace.resolve() == (tmp_path / "results" / "case" / "r1" / "trace.jsonl").resolve()
 
     def test_the_server_is_started_by_module_not_by_command_name(self, tmp_path):
-        """The console script is geospatial-mcp here and mcp-geospatial on main."""
+        """The console script was renamed from geospatial-mcp; the module name was not."""
         server = harness._server(CASE, harness.RunPaths(tmp_path / "run"), tmp_path)
         assert server["command"] == "uv"
         assert server["args"][-3:] == ["python", "-m", "geospatial_mcp"]

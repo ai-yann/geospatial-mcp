@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "geospatial-mcp"
+name = "mcp-geospatial"
 version = "0.1.0"
 description = "Geospatial MCP server: coordinates, geocoding, routing, terrain, weather and RF propagation"
 readme = "README.md"
@@ -91,7 +91,7 @@ dev = [
 ]
 
 [project.scripts]
-geospatial-mcp = "geospatial_mcp.cli:main"
+mcp-geospatial = "geospatial_mcp.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/ystoneman/geospatial-mcp"
@@ -126,7 +126,7 @@ asyncio_mode = "auto"
 # Network tests are opt-in: `pytest -m network` runs them against live services.
 addopts = "-m 'not network' --strict-markers"
 markers = [
-    "network: hits a live external API; excluded by default, run nightly in CI",
+    "network: hits a live external API; excluded by default",
     "slow: takes more than a second",
 ]
 

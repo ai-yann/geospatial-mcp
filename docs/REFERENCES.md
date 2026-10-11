@@ -38,8 +38,8 @@ snapshot.
   a list but a draft *standard*: a vendor-neutral vocabulary of tool names and
   JSON Schemas for geospatial MCP servers, with conformance fixtures and a
   governance process. Worth watching if you care whether these servers ever
-  agree on what a tool is called. Apache-2.0. (It shares this project's name and
-  is unrelated to it.)
+  agree on what a tool is called. Apache-2.0. (It shares this repository's name
+  and is unrelated to it.)
 - **[The official MCP registry](https://registry.modelcontextprotocol.io/v0/servers?search=geospatial)**
   — searchable API, broader than geospatial, authoritative for what has actually
   been published. Worth knowing that none of these indexes is complete: a

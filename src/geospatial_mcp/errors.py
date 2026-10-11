@@ -41,16 +41,16 @@ __all__ = [
     "install_commands",
 ]
 
-#: Where the server installs from. The PyPI package named ``geospatial-mcp`` is
-#: an unrelated project, so an install command that gives only the package name
-#: would fetch that instead.
+#: Where the server installs from. It is not on PyPI, and the PyPI package named
+#: ``geospatial-mcp`` is an unrelated project, so an install command that gives
+#: only a package name would fail or fetch someone else's code.
 INSTALL_SOURCE = "git+https://github.com/ystoneman/geospatial-mcp"
 
 
 def install_commands(extra: str) -> tuple[str, str]:
     """The ``uvx`` and ``pip`` commands that install this server with ``extra``."""
-    requirement = f"'geospatial-mcp[{extra}] @ {INSTALL_SOURCE}'"
-    return f"uvx --from {requirement} geospatial-mcp", f"pip install {requirement}"
+    requirement = f"'mcp-geospatial[{extra}] @ {INSTALL_SOURCE}'"
+    return f"uvx --from {requirement} mcp-geospatial", f"pip install {requirement}"
 
 
 class GeoError(ToolError):

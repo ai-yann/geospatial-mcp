@@ -66,19 +66,46 @@ class TestBallpark:
 
 
 class TestNetworkFallback:
-    def test_an_unfetchable_grid_falls_back_rather_than_failing(self, monkeypatch):
-        """With PROJ_NETWORK on and no route to cdn.proj.org, PROJ returns inf.
+    def test_an_unfetchable_grid_falls_back_rather_than_failing(self, tmp_path):
+        """With PROJ_NETWORK on and no route to the grid CDN, PROJ returns inf.
 
         The honest answer is the 2 m local operation, not "outside the valid area".
-        The socket guard in conftest makes every fetch fail, which is exactly the
-        firewalled case this exists for.
+
+        This runs in a subprocess, pointed at a closed local port. The socket
+        guard in conftest cannot make the fetch fail: PROJ downloads grids
+        through its own C libcurl, below Python's socket module, so in-process
+        the test would either fetch the grid for real (on an open network, where
+        it then fails for the wrong reason) or pass by luck (behind a proxy).
+        A dead endpoint and an empty grid cache fail the same way everywhere,
+        and send nothing off the machine.
         """
-        pyproj.network.set_network_enabled(True)
-        result = transform_point(*BNG, "EPSG:27700", "EPSG:4326")
-        assert result.network_fallback
-        assert result.accuracy_m == pytest.approx(2.0)
-        assert "uk_os_OSTN15_NTv2_OSGBtoETRS.tif" in result.missing_grids
-        assert result.y == pytest.approx(51.50399, abs=1e-4)
+        import json
+        import os
+        import subprocess
+        import sys
+
+        script = (
+            "import json\n"
+            "from geospatial_mcp.geo.crs import transform_point\n"
+            "r = transform_point(530000.0, 180000.0, 'EPSG:27700', 'EPSG:4326')\n"
+            "print(json.dumps({'fallback': r.network_fallback, 'accuracy': r.accuracy_m,"
+            " 'grids': r.missing_grids, 'lat': r.y}))\n"
+        )
+        env = {
+            **os.environ,
+            "PROJ_NETWORK": "ON",
+            "PROJ_NETWORK_ENDPOINT": "http://127.0.0.1:9",
+            "PROJ_USER_WRITABLE_DIRECTORY": str(tmp_path),
+        }
+        run = subprocess.run(
+            [sys.executable, "-c", script], env=env, capture_output=True, text=True, timeout=120
+        )
+        assert run.returncode == 0, run.stderr
+        result = json.loads(run.stdout.strip().splitlines()[-1])
+        assert result["fallback"]
+        assert result["accuracy"] == pytest.approx(2.0)
+        assert "uk_os_OSTN15_NTv2_OSGBtoETRS.tif" in result["grids"]
+        assert result["lat"] == pytest.approx(51.50399, abs=1e-4)
 
     def test_a_point_genuinely_outside_the_crs_still_raises(self):
         with pytest.raises(GeoInputError):

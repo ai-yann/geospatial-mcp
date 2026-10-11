@@ -89,7 +89,7 @@ MCP_NAME = "geospatial"
 WITH_SERVER = ("mcp", "mcp-only")
 
 #: Strings that show an agent reaching into this server's own code or checkout.
-SERVER_MARKERS = ("geospatial_mcp", "geospatial-mcp")
+SERVER_MARKERS = ("geospatial_mcp", "geospatial-mcp", "mcp-geospatial")
 
 
 # ---------------------------------------------------------------- run layout

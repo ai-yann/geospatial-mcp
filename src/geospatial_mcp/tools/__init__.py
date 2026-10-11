@@ -5,7 +5,7 @@ for one reason: every tool definition costs context in the model's window on
 every single turn, whether or not it is used. A server that exposes fifty tools
 by default is quietly taxing every conversation.
 
-The default set (``core`` + ``rf``) is 22 tools, roughly 12k tokens of schema.
+The default set (``core`` + ``rf``) is 22 tools, about 40 KB of ``tools/list``.
 Everything else is opt-in via ``GEO_TOOLSETS`` or ``--toolsets``.
 
 Selection follows the pattern the GitHub MCP server established::

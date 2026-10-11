@@ -223,7 +223,7 @@ def to_gpx(coords: Sequence[tuple[float, float]], *, name: str = "track") -> str
     points = "".join(f'<trkpt lat="{lat}" lon="{lon}"></trkpt>' for lat, lon in coords)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
-        '<gpx version="1.1" creator="geospatial-mcp" '
+        '<gpx version="1.1" creator="mcp-geospatial" '
         'xmlns="http://www.topografix.com/GPX/1/1">'
         f"<trk><name>{name}</name><trkseg>{points}</trkseg></trk></gpx>"
     )

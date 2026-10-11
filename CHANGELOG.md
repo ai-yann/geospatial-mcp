@@ -15,6 +15,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The default `tools/list` is about 16% smaller (47.8k to 40.0k characters).
+  Tool descriptions no longer carry docstring indentation, and the `meta`
+  definition repeated in every output schema is reduced to a bare object; the
+  server instructions describe `meta` once.
 - `rf_link_budget` now says that `cell_area_km2` is the hexagonal area one site
   serves in a tiled plan (2.598·r²), not the area of one isolated circular cell
   (π·r²). Summing it for non-overlapping sites undercounted their coverage by
@@ -36,11 +40,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   including the one that explains a distance looks like degrees, lost its text.
   `GeoError` now subclasses `ToolError`. `uv.lock` still pins 2.0.0, so a new CI
   job runs the tests against the newest 2.x as well.
-- Install instructions, and the install commands in error messages about a
-  missing extra, fetch the server from this repository. The PyPI package named
-  `geospatial-mcp` is an unrelated project, so installing by that name ran
-  someone else's code. `server.json` no longer lists it as this server's PyPI
-  package.
+- The install commands in error messages about a missing extra fetch the
+  server from this repository. They named a PyPI package, but the server is
+  not on PyPI, and the PyPI package named `geospatial-mcp` is an unrelated
+  project. `server.json` no longer lists a PyPI package for the same reason.
 
 ## [0.1.0]
 
@@ -54,8 +57,9 @@ First release.
   Desktop, OpenAI Codex CLI, Cursor, VS Code, Zed, Windsurf and Gemini CLI.
   Streamable HTTP is available with `--transport http` for self-hosting, and
   binds `127.0.0.1` unless the platform sets `PORT`.
-- Installable with `uvx` from this repository, with no system packages: binary
-  wheels on Linux, macOS and Windows across x86-64 and ARM.
+- Installable with `uvx` from this repository as `mcp-geospatial`, with no
+  system packages: binary wheels on Linux, macOS and Windows across x86-64 and
+  ARM.
 - Toolsets gated by `GEO_TOOLSETS` / `--toolsets`, with `default` (22 tools),
   `all`, and an `offline` preset of the 13 tools that make no network call.
 

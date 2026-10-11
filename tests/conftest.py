@@ -9,6 +9,11 @@ only for non-loopback addresses. Blocking the constructor outright also breaks
 ``socket.socketpair()``, which asyncio uses for the event loop's internal
 self-pipe -- so every async test would fail for reasons unrelated to the
 network.
+
+The guard only sees Python's ``socket`` module. A C extension with its own
+networking goes around it -- notably PROJ, which fetches datum grids through
+libcurl when ``PROJ_NETWORK`` is on. Never enable PROJ networking in-process in
+a test; see ``tests/geo/test_crs.py`` for the subprocess pattern instead.
 """
 
 from __future__ import annotations

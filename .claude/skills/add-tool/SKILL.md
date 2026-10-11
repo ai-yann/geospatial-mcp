@@ -1,12 +1,12 @@
 ---
 name: add-tool
 description: >
-  Add a new tool to the geospatial-mcp server. Use when asked to add a
+  Add a new tool to the mcp-geospatial server. Use when asked to add a
   geospatial capability, wrap a new data provider, or expose an existing
   geo/ function as an MCP tool.
 ---
 
-# Adding a tool to geospatial-mcp
+# Adding a tool to mcp-geospatial
 
 Follow this order. Skipping straight to `tools/` produces a tool that works but
 cannot be unit-tested and duplicates logic.

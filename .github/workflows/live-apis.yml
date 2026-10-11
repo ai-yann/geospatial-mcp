@@ -12,6 +12,10 @@ on:
 jobs:
   live:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The last step files an issue, and the default token is read-only.
+      issues: write
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -19,18 +23,16 @@ jobs:
           enable-cache: true
       - run: uv sync --all-extras
 
-      - name: Provider contract tests
-        id: tests
-        continue-on-error: true
-        run: uv run pytest -q -m network
-
+      # The eval library is the live check: its network cases call the real
+      # providers through the real tools. pytest has no network-marked tests,
+      # and `pytest -m network` exits 5 when it collects nothing.
       - name: Eval library against live services
         id: evals
         continue-on-error: true
         run: uv run python evals/run.py --mode validate --network
 
       - name: Open an issue if an upstream broke
-        if: steps.tests.outcome == 'failure' || steps.evals.outcome == 'failure'
+        if: steps.evals.outcome == 'failure'
         uses: actions/github-script@v7
         with:
           script: |

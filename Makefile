@@ -2,7 +2,7 @@
 .DEFAULT_GOAL := help
 UV ?= uv
 
-.PHONY: help install check lint fix types test test-network test-cov evals evals-network run tools clean
+.PHONY: help install check lint fix types test test-cov evals evals-network run tools clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -27,9 +27,6 @@ types: ## Type-check with mypy
 test: ## Run the offline test suite
 	$(UV) run pytest -q
 
-test-network: ## Also run tests that call live external APIs
-	$(UV) run pytest -q -m "network or not network"
-
 test-cov: ## Test with a coverage report
 	$(UV) run pytest --cov=geospatial_mcp --cov-report=term-missing
 
@@ -40,10 +37,10 @@ evals-network: ## Validate every eval case, including live-API ones
 	$(UV) run python evals/run.py --mode validate --network
 
 run: ## Start the server on stdio
-	$(UV) run geospatial-mcp
+	$(UV) run mcp-geospatial
 
 tools: ## Print the registered tool catalogue as JSON
-	$(UV) run geospatial-mcp --list-tools
+	$(UV) run mcp-geospatial --list-tools
 
 clean: ## Remove caches and build artefacts
 	rm -rf .pytest_cache .ruff_cache .mypy_cache dist build *.egg-info

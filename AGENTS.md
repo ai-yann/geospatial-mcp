@@ -8,11 +8,11 @@ Working notes for coding agents and humans. Commands first.
 uv sync --all-extras       # set up
 make check                 # lint + types + tests. Run before every commit.
 make test                  # pytest, offline only (default)
-make test-network          # include tests that call live APIs
 make lint                  # ruff check + format --check
 make fix                   # ruff --fix + format
 make types                 # mypy
 make evals                 # tool-selection evals (offline cases)
+make evals-network         # every eval case, against the live APIs
 make run                   # start the server on stdio
 make tools                 # print the tool catalogue as JSON
 ```

@@ -23,7 +23,7 @@ logger = logging.getLogger("geospatial_mcp")
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="geospatial-mcp",
+        prog="mcp-geospatial",
         description=(
             "Geospatial MCP server: coordinates, geocoding, routing, terrain, "
             "weather and radio propagation."
@@ -31,13 +31,13 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  geospatial-mcp                          # stdio, default toolsets\n"
-            "  geospatial-mcp --toolsets all           # every tool\n"
-            "  geospatial-mcp --transport http --port 8000\n"
-            "  geospatial-mcp --list-tools             # print the tool catalogue and exit\n"
+            "  mcp-geospatial                          # stdio, default toolsets\n"
+            "  mcp-geospatial --toolsets all           # every tool\n"
+            "  mcp-geospatial --transport http --port 8000\n"
+            "  mcp-geospatial --list-tools             # print the tool catalogue and exit\n"
         ),
     )
-    parser.add_argument("--version", action="version", version=f"geospatial-mcp {__version__}")
+    parser.add_argument("--version", action="version", version=f"mcp-geospatial {__version__}")
     parser.add_argument(
         "--transport",
         choices=("stdio", "http"),
@@ -107,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.transport == "stdio":
-        logger.info("geospatial-mcp %s starting on stdio (toolsets: %s)", __version__, toolsets)
+        logger.info("mcp-geospatial %s starting on stdio (toolsets: %s)", __version__, toolsets)
         server.run(transport="stdio")
         return 0
 
@@ -115,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     # Bind to all interfaces only when a platform explicitly assigns a port,
     # which is the signal that we are inside a managed container.
     host = args.host if "PORT" not in os.environ else "0.0.0.0"
-    logger.info("geospatial-mcp %s starting on http://%s:%d/mcp", __version__, host, port)
+    logger.info("mcp-geospatial %s starting on http://%s:%d/mcp", __version__, host, port)
     server.settings.host = host  # type: ignore[attr-defined]
     server.settings.port = port  # type: ignore[attr-defined]
     server.run(transport="streamable-http")

@@ -24,7 +24,9 @@ NAME_PATTERN = re.compile(
 
 #: Hard ceiling on the serialised default catalogue. Every tool definition is
 #: re-sent on every turn, so this is a recurring context cost, not a one-off.
-SCHEMA_BUDGET_CHARS = 65_000
+#: The default catalogue measures about 40,000; the headroom is room for a few
+#: more tools, not for letting existing ones grow.
+SCHEMA_BUDGET_CHARS = 50_000
 
 
 class TestNaming:
@@ -141,6 +143,15 @@ class TestSchemaBudget:
                 f"tools/list is {len(payload):,} chars, over the {SCHEMA_BUDGET_CHARS:,} budget. "
                 "Trim descriptions or response models before adding more tools."
             )
+
+    async def test_descriptions_carry_no_source_indentation(self):
+        """Docstring indentation is whitespace the model reads on every turn."""
+        async with mcp_client() as client:
+            for tool in (await client.list_tools()).tools:
+                indented = [
+                    line for line in (tool.description or "").splitlines() if line.startswith(" ")
+                ]
+                assert not indented, f"{tool.name}: {indented[0]!r}"
 
     async def test_schemas_carry_no_redundant_titles(self):
         """Pydantic emits `title: 'Distance M'` for `distance_m`. Pure restatement."""
@@ -314,17 +325,27 @@ class TestExtrasGating:
         assert "git+https://github.com/ystoneman/geospatial-mcp" in message
 
     def test_install_commands_fetch_this_repository_not_the_pypi_name(self):
-        """The PyPI package named geospatial-mcp is an unrelated project."""
+        """The server is not on PyPI, and the PyPI geospatial-mcp is an unrelated project.
+
+        The package and command names are read from pyproject.toml, so a rename
+        that misses the install helper fails here.
+        """
+        import tomllib
+        from pathlib import Path
+
         from packaging.requirements import Requirement
 
         from geospatial_mcp.errors import GeoUnavailable, install_commands
 
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        project = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]
+        (command,) = project["scripts"]
         uvx, pip = install_commands("stats")
         requirement = Requirement(pip.removeprefix("pip install ").strip("'"))
-        assert requirement.name == "geospatial-mcp"
+        assert requirement.name == project["name"]
         assert requirement.extras == {"stats"}
         assert requirement.url == "git+https://github.com/ystoneman/geospatial-mcp"
-        assert uvx.startswith("uvx --from ") and uvx.endswith(" geospatial-mcp")
+        assert uvx.startswith("uvx --from ") and uvx.endswith(f" {command}")
         assert uvx in str(GeoUnavailable("Clustering", "stats"))
 
     def test_toolsets_without_an_extra_never_probe(self):

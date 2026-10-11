@@ -22,12 +22,12 @@ FROM python:3.12-slim AS runtime
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH" \
-    GEO_CACHE_DIR=/var/cache/geospatial-mcp
+    GEO_CACHE_DIR=/var/cache/mcp-geospatial
 
 # Run unprivileged. The cache directory is the only writable path needed.
 RUN useradd --create-home --uid 10001 geo \
-    && mkdir -p /var/cache/geospatial-mcp \
-    && chown -R geo:geo /var/cache/geospatial-mcp
+    && mkdir -p /var/cache/mcp-geospatial \
+    && chown -R geo:geo /var/cache/mcp-geospatial
 
 WORKDIR /app
 COPY --from=builder --chown=geo:geo /app/.venv /app/.venv
@@ -37,4 +37,4 @@ USER geo
 
 # stdio by default, so `docker run -i` works with any MCP client.
 # For HTTP:  docker run -p 8000:8000 <image> --transport http
-ENTRYPOINT ["geospatial-mcp"]
+ENTRYPOINT ["mcp-geospatial"]

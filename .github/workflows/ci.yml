@@ -104,11 +104,22 @@ jobs:
       - name: Install it into a clean environment and list the tools
         shell: bash
         run: |
-          uv venv /tmp/clean
-          uv pip install --python /tmp/clean dist/*.whl
-          uv run --python /tmp/clean geospatial-mcp --version
-          uv run --python /tmp/clean geospatial-mcp --list-tools > /tmp/tools.json
-          python -c "import json,sys; t=json.load(open('/tmp/tools.json')); print(f'{len(t)} tools'); sys.exit(0 if len(t)==25 else 1)"
+          # Keep everything inside the workspace: Git Bash on Windows maps /tmp to
+          # its own directory, which native Windows programs then cannot find.
+          uv venv clean-env
+          uv pip install --python clean-env dist/*.whl
+          # Call the environment's own executables. `uv run` inside a project
+          # directory builds a fresh project .venv from source and ignores the
+          # clean one, so it would never exercise the installed wheel at all.
+          if [ -d clean-env/Scripts ]; then bin=clean-env/Scripts; else bin=clean-env/bin; fi
+          "$bin/mcp-geospatial" --version
+          "$bin/mcp-geospatial" --list-tools > tools.json
+          # The exact count is pinned once, in tests/mcp/test_contract.py. A second
+          # copy here drifted the first time the catalogue changed; this only checks
+          # that the installed wheel serves a real catalogue.
+          "$bin/python" -c "import json,sys; t={x['name'] for x in json.load(open('tools.json'))}; print(f'{len(t)} tools'); sys.exit(0 if len(t) > 15 and {'coord_convert','route_directions','rf_link_budget'} <= t else 1)"
+          # And that the wheel, not the checkout, is what ran.
+          "$bin/python" -c "import geospatial_mcp, sys; p = geospatial_mcp.__file__; print(p); sys.exit(0 if 'clean-env' in p else 1)"
 
   attribution:
     runs-on: ubuntu-latest
