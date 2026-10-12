@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from dataclasses import replace
 from typing import Any
 
 from ..attribution import attribution_for
-from ..errors import GeoInputError
+from ..errors import GeoInputError, GeoNoResults, GeoUpstreamError
 from ..geo import geodesy
-from ..geo.coords import Location, parse_location
+from ..geo.coords import GEOHASH_PREFIX, Location, as_geohash, parse_location
 from ..models import ResponseMeta
 
 __all__ = [
@@ -41,6 +42,10 @@ _TIE_PROMINENCE = 0.05
 MENTION_PROMINENCE = 0.15
 _FAR_APART_M = 50_000.0
 _NAME_CHARS = 110
+#: An unmarked geohash this short names a cell about 39 km wide, and is spelt
+#: like a UK postcode district ("sw19", "ec1v"), so the reading is always noted.
+#: A marked one ("geohash:u33d") is longer than this, so it gets no note.
+_SHORT_GEOHASH_CHARS = 4
 
 #: A geometry argument as it can actually arrive over the wire.
 #:
@@ -70,20 +75,46 @@ def meta(
     Without that note a response to "weather in Springfield" is a correct answer
     about a place the user may not have meant, with nothing to show which.
     """
+    resolved = list(resolved)
     geocoded = [loc for loc in resolved if loc.geocoded]
     all_sources = list(dict.fromkeys([*sources, *(["nominatim"] if geocoded else [])]))
+    # A word that fell back to a geohash was looked up first, so the answer
+    # was not computed offline even though no source is owed attribution.
+    looked_up = any(loc.ambiguous_geohash for loc in resolved)
     return ResponseMeta(
         sources=all_sources,
         attribution=attribution_for(*all_sources),
-        offline=offline if not all_sources else False,
+        offline=offline if not all_sources and not looked_up else False,
         cached=cached,
         truncated=truncated,
-        notes=[*(_geocoding_note(loc) for loc in geocoded), *(notes or [])],
+        notes=[*(n for loc in resolved if (n := _reading_note(loc))), *(notes or [])],
     )
 
 
 def _short(name: str) -> str:
     return name if len(name) <= _NAME_CHARS else name[: _NAME_CHARS - 1].rstrip(", ") + "…"
+
+
+def _reading_note(loc: Location) -> str | None:
+    """Say how a location was read, where it could have been read another way."""
+    if loc.geocoded:
+        return _geocoding_note(loc)
+    if loc.kind == "geohash" and loc.ambiguous_geohash:
+        lat, lon = loc.as_tuple()
+        return (
+            f"No place called {loc.raw!r} was found, so it was read as a geohash: "
+            f"the cell centred on {lat:.5f}, {lon:.5f}. Write "
+            f"'{GEOHASH_PREFIX}{loc.raw.lower()}' to skip the place-name lookup."
+        )
+    if loc.kind == "geohash" and len(loc.raw) <= _SHORT_GEOHASH_CHARS:
+        lat, lon = loc.as_tuple()
+        return (
+            f"Read {loc.raw!r} as a {len(loc.raw)}-character geohash, a cell about "
+            f"{(loc.precision_m or 0) / 1000:.0f} km wide centred on {lat:.5f}, {lon:.5f}. "
+            "If it is a postcode or another short code, add the town or country after "
+            "it so it is read as a place name, or pass coordinates."
+        )
+    return None
 
 
 def _geocoding_note(loc: Location) -> str:
@@ -92,6 +123,12 @@ def _geocoding_note(loc: Location) -> str:
     if loc.alternatives:
         others = "; ".join(_short(a) for a in loc.alternatives)
         note += f" Other places share the name: {others}. Pass coordinates to use one of those."
+    if loc.ambiguous_geohash:
+        g_lat, g_lon = as_geohash(loc.raw).as_tuple()
+        note += (
+            f" {loc.raw!r} is also a valid geohash, for the cell centred on "
+            f"{g_lat:.5f}, {g_lon:.5f}; pass '{GEOHASH_PREFIX}{loc.raw.lower()}' to use that."
+        )
     return note
 
 
@@ -135,19 +172,42 @@ def resolve(location: str, *, what: str = "location", allow_geocode: bool = True
 
     Geocoding here rather than in each tool is what lets every tool accept
     ``"Eiffel Tower"`` as readily as ``"48.8584,2.2945"``.
+
+    A word that is also a valid geohash ("Bergen", "gcpvj") is geocoded first,
+    and read as a geohash only if no place has that name. Either way the
+    returned location keeps ``ambiguous_geohash``, so :func:`meta` can say which
+    reading was used and how to ask for the other.
     """
     parsed = parse_location(location)
     if parsed.resolved:
         return parsed
+    # "Bergen" and "gcpvj" are both valid geohashes; only one is a place.
+    marked = f"{GEOHASH_PREFIX}{parsed.raw.lower()}"
     if not allow_geocode:
+        hint = f" If it is a geohash, write {marked!r}." if parsed.ambiguous_geohash else ""
         raise GeoInputError.with_example(
             got=location,
-            problem=f"The {what} must be coordinates, not a place name, for this tool.",
+            problem=f"The {what} must be coordinates, not a place name, for this tool.{hint}",
             example="48.8584,2.2945",
         )
     from ..net.providers import nominatim
 
-    results, _ = nominatim.geocode(parsed.raw, limit=nominatim.CANDIDATES)
+    try:
+        results, _ = nominatim.geocode(parsed.raw, limit=nominatim.CANDIDATES)
+    except GeoNoResults:
+        if not parsed.ambiguous_geohash:
+            raise
+        # No place has the name, so the other reading is the one meant.
+        return replace(as_geohash(parsed.raw), ambiguous_geohash=True)
+    except GeoUpstreamError as exc:
+        if parsed.ambiguous_geohash:
+            # Add the hint to the message but re-raise the same exception, so a
+            # GeoRateLimited keeps its type and retry_after_s.
+            exc.args = (
+                f"{exc} If {parsed.raw!r} is a geohash rather than a place name, "
+                f"write {marked!r} and no lookup is needed.",
+            )
+        raise
     best = results[0]
     rivals = far_alternatives(results, within=_TIE_PROMINENCE)
     if rivals:
@@ -178,6 +238,7 @@ def resolve(location: str, *, what: str = "location", allow_geocode: bool = True
             for r in far_alternatives(results, within=MENTION_PROMINENCE)[:2]
             if r.get("display_name")
         ),
+        ambiguous_geohash=parsed.ambiguous_geohash,
     )
 
 

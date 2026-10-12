@@ -24,9 +24,18 @@ Supported forms::
     "48 51.5 N, 2 17.6 E"      degrees/decimal-minutes
     "31UDQ4825211954"          USNG / MGRS grid reference
     "u09tunquc"                geohash
+    "geohash:u09tunquc"        geohash, marked so it is never taken for a place name
     "891fb46741bffff"          H3 cell index
     "8FW4V75V+9R6"             Plus Code (Open Location Code)
     "Eiffel Tower, Paris"      place name -> needs geocoding by the caller
+
+A word such as "Bergen", "Denver" or "Sydney" is spelt entirely from the
+geohash alphabet, and decoding it lands in Alaska, the Atlantic or Turkey. So a
+bare token is read as a geohash straight away only when it is written the way
+geohashes are: lowercase, with a digit among the letters. Any other token that
+could be one is a place name that is *also* a valid geohash
+(``Location.ambiguous_geohash``); the caller geocodes it first and falls back
+to the geohash only if no place has that name.
 """
 
 from __future__ import annotations
@@ -40,7 +49,15 @@ import h3
 from ..errors import GeoInputError
 from . import grid_ref, grids
 
-__all__ = ["Location", "LocationKind", "format_dms", "looks_like_place_name", "parse_location"]
+__all__ = [
+    "GEOHASH_PREFIX",
+    "Location",
+    "LocationKind",
+    "as_geohash",
+    "format_dms",
+    "looks_like_place_name",
+    "parse_location",
+]
 
 LocationKind = Literal["latlon", "dms", "grid", "geohash", "h3", "pluscode", "place_name"]
 
@@ -64,6 +81,10 @@ class Location:
     #: and of any far-away places of similar prominence it could have meant.
     display_name: str | None = None
     alternatives: tuple[str, ...] = ()
+    #: True when ``raw`` is a bare word that is also a valid geohash, such as
+    #: "Bergen" or "gcpvj". Such a word is geocoded first; ``kind`` says which
+    #: reading was used: ``place_name`` if a place matched, ``geohash`` if not.
+    ambiguous_geohash: bool = False
 
     @property
     def geocoded(self) -> bool:
@@ -99,16 +120,73 @@ _DMS_COMPONENT = re.compile(
 _GEOHASH_RE = re.compile(r"^[0123456789bcdefghjkmnpqrstuvwxyz]{1,12}$")
 _H3_RE = re.compile(r"^[0-9a-f]{15,16}$", re.IGNORECASE)
 
+#: Marks the rest of a location as a geohash, whatever else it could be read as.
+GEOHASH_PREFIX = "geohash:"
+#: The shortest unmarked token considered as a geohash. Shorter ones ("NYC",
+#: "UK") are names, and a 3-character geohash is a cell 156 km across.
+_GEOHASH_MIN_UNMARKED = 4
+
+
+def _unmarked_geohash(text: str) -> Literal["geohash", "ambiguous"] | None:
+    """How a token without the ``geohash:`` prefix reads as a geohash, if at all.
+
+    Geohashes are written in lowercase, and most carry a digit: 85% of
+    5-character ones and 97% of 9-character ones. A token that is lowercase and
+    mixes digits with letters ("u09tunquc") is a geohash. One without a digit
+    ("Bergen", "Sydney", "gcpvj"), with capitals ("SW19") or with only digits
+    (the postcode "90210") is also valid geohash text, but far more often a
+    place, so it is only ``ambiguous``.
+    """
+    low = text.lower()
+    if len(low) < _GEOHASH_MIN_UNMARKED or not _GEOHASH_RE.match(low):
+        return None
+    has_digit = any(c.isdigit() for c in low)
+    has_letter = any(c.isalpha() for c in low)
+    if text == low and has_digit and has_letter:
+        return "geohash"
+    return "ambiguous"
+
+
+def _marked_geohash(text: str) -> str | None:
+    """The code after a ``geohash:`` prefix (any case), or None if unmarked."""
+    if text[: len(GEOHASH_PREFIX)].lower() != GEOHASH_PREFIX:
+        return None
+    return text[len(GEOHASH_PREFIX) :].strip()
+
+
+def as_geohash(code: str, *, raw: str | None = None) -> Location:
+    """Read ``code`` as a geohash, whatever else it could be read as."""
+    low = code.strip().lower()
+    if not _GEOHASH_RE.match(low):
+        raise GeoInputError.with_example(
+            got=raw if raw is not None else code,
+            problem=(
+                "A geohash is 1 to 12 characters from its own alphabet: the digits "
+                "and the letters other than a, i, l and o."
+            ),
+            example=f"{GEOHASH_PREFIX}u09tunquc",
+        )
+    lat, lon = grids.geohash_decode(low)
+    return Location(
+        raw=raw if raw is not None else code.strip(),
+        kind="geohash",
+        latitude=lat,
+        longitude=lon,
+        precision_m=float(grids.GEOHASH_PRECISION_M.get(len(low), 1)),
+    )
+
 
 def looks_like_place_name(value: str) -> bool:
     """True if the string is best treated as free text for a geocoder."""
+    text = value.strip()
     return not any(
         (
+            _marked_geohash(text) is not None,
             _DECIMAL_PAIR.match(value),
             grid_ref.is_grid_like(value),
             "+" in value,
-            _H3_RE.match(value.strip()) and _is_valid_h3(value.strip()),
-            _GEOHASH_RE.match(value.strip().lower()) and len(value.strip()) >= 4,
+            _H3_RE.match(text) and _is_valid_h3(text),
+            _unmarked_geohash(text) == "geohash",
             _DMS_HINT.search(value),
         )
     )
@@ -178,7 +256,9 @@ def parse_location(value: str) -> Location:
 
     Detection is ordered from least to most ambiguous. Place names are the
     fallback, never a guess: anything that structurally matches a coordinate
-    notation is parsed as one.
+    notation is parsed as one. The exception is a word that is only *also* a
+    geohash, such as "Bergen": it comes back as a place name with
+    ``ambiguous_geohash`` set, for the caller to geocode first.
     """
     if value is None or not str(value).strip():
         raise GeoInputError.with_example(
@@ -187,6 +267,12 @@ def parse_location(value: str) -> Location:
             example="48.8584, 2.2945",
         )
     raw = str(value).strip()
+
+    # 0. An explicit "geohash:" prefix overrides every other reading, and is
+    #    checked before DMS because "geohash:s000" holds a bare hemisphere letter.
+    marked = _marked_geohash(raw)
+    if marked is not None:
+        return as_geohash(marked, raw=raw)
 
     # 1. Decimal degrees -- the canonical form, checked first and cheapest.
     m = _DECIMAL_PAIR.match(raw)
@@ -227,21 +313,16 @@ def parse_location(value: str) -> Location:
         lat, lon = _validate_range(*_parse_dms(raw), raw)
         return Location(raw=raw, kind="dms", latitude=lat, longitude=lon)
 
-    # 6. Geohash. Last of the coordinate forms because short base-32 strings
-    #    collide with real place names ("bergen" is a valid geohash).
-    low = raw.lower()
-    if _GEOHASH_RE.match(low) and len(low) >= 4 and " " not in raw:
-        lat, lon = grids.geohash_decode(low)
-        return Location(
-            raw=raw,
-            kind="geohash",
-            latitude=lat,
-            longitude=lon,
-            precision_m=float(grids.GEOHASH_PRECISION_M.get(len(low), 1)),
-        )
+    # 6. Geohash. Last of the coordinate forms because base-32 strings collide
+    #    with real place names: "Bergen", "Denver" and "Sydney" are all valid
+    #    geohashes. Only the unmistakable form is decoded here; see
+    #    _unmarked_geohash for the rule.
+    reading = _unmarked_geohash(raw)
+    if reading == "geohash":
+        return as_geohash(raw)
 
-    # 7. Free text for a geocoder.
-    return Location(raw=raw, kind="place_name")
+    # 7. Free text for a geocoder, flagged when it could also be a geohash.
+    return Location(raw=raw, kind="place_name", ambiguous_geohash=reading == "ambiguous")
 
 
 def format_dms(decimal_degrees: float, *, is_latitude: bool) -> str:

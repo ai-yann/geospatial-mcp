@@ -20,7 +20,7 @@ from .._sdk import MCPServer, compute, network
 from ..errors import GeoInputError
 from ..geo import formats as fmt
 from ..geo import geodesy, grid_ref, grids, solar, timezones
-from ..geo.coords import Location, format_dms, parse_location
+from ..geo.coords import GEOHASH_PREFIX, Location, as_geohash, format_dms, parse_location
 from ..geo.crs import TransformResult, describe_crs, transform_point, utm_zone_of
 from ..geo.geometry import (
     geodesic_buffer,
@@ -81,8 +81,9 @@ def register(mcp: MCPServer) -> None:
                 description=(
                     "A position in any supported notation: decimal degrees "
                     "'48.8584,2.2945'; DMS '48°51'30\"N 2°17'40\"E'; USNG/MGRS "
-                    "'31UDQ4825211954'; geohash 'u09tunquc'; H3 '891fb46741bffff'; "
-                    "Plus Code '8FW4V75V+9R6'; or a place name to geocode."
+                    "'31UDQ4825211954'; geohash 'u09tunquc' (mark one that has no digit "
+                    "or has capitals: 'geohash:gcpvj'); H3 '891fb46741bffff'; Plus Code "
+                    "'8FW4V75V+9R6'; or a place name to geocode."
                 )
             ),
         ],
@@ -113,8 +114,6 @@ def register(mcp: MCPServer) -> None:
         To check whether a string is a valid coordinate without converting it,
         use coord_describe.
         """
-        parsed = parse_location(location)
-        used_geocoding = not parsed.resolved
         loc = resolve(location)
         lat, lon = loc.as_tuple()
 
@@ -139,15 +138,17 @@ def register(mcp: MCPServer) -> None:
             geojson={"type": "Point", "coordinates": [round(lon, 8), round(lat, 8)]},
         )
         notes: list[str] = []
-        if parsed.kind == "grid":
+        if loc.kind == "grid":
             notes.append(
                 "A USNG/MGRS reference names the south-west corner of a grid square, "
-                f"not a point; this one is {parsed.precision_m:.0f} m on a side."
+                f"not a point; this one is {loc.precision_m:.0f} m on a side."
             )
         return CoordConvertResult(
             input=location,
-            detected_format="place name (geocoded)" if used_geocoding else parsed.kind,
-            input_precision_m=parsed.precision_m,
+            # From the resolved location, not the parse: a word like "gcpvj" is
+            # parsed as a place name but read as a geohash when no place matches.
+            detected_format="place name (geocoded)" if loc.geocoded else loc.kind,
+            input_precision_m=loc.precision_m,
             formats=formats,
             meta=meta(offline=True, notes=notes, resolved=[loc]),
         )
@@ -186,14 +187,22 @@ def register(mcp: MCPServer) -> None:
                 meta=meta(offline=True),
             )
         if parsed.kind == "place_name":
+            problem = (
+                "This is free text, not a coordinate. It can still be used as a "
+                "location anywhere in this server -- it will be geocoded."
+            )
+            if parsed.ambiguous_geohash:
+                g_lat, g_lon = as_geohash(parsed.raw).as_tuple()
+                problem += (
+                    f" It is also a valid geohash, for the cell centred on {g_lat:.5f}, "
+                    f"{g_lon:.5f}, which is used only if no place has this name. Write "
+                    f"'{GEOHASH_PREFIX}{parsed.raw.lower()}' to read it as a geohash."
+                )
             return CoordDescribeResult(
                 input=value,
                 is_valid=False,
                 detected_format="place_name",
-                problem=(
-                    "This is free text, not a coordinate. It can still be used as a "
-                    "location anywhere in this server -- it will be geocoded."
-                ),
+                problem=problem,
                 meta=meta(offline=True),
             )
         return CoordDescribeResult(
@@ -208,7 +217,7 @@ def register(mcp: MCPServer) -> None:
                 if parsed.kind == "grid"
                 else f"{parsed.latitude:.6f}, {parsed.longitude:.6f}"
             ),
-            meta=meta(offline=True),
+            meta=meta(offline=True, resolved=[parsed]),
         )
 
     # ------------------------------------------------------------------------
@@ -682,7 +691,8 @@ def _register_places(mcp: MCPServer) -> None:
             Field(
                 description=(
                     "Position in any coordinate notation: decimal degrees, DMS, "
-                    "a USNG/MGRS grid reference, geohash, H3 or Plus Code."
+                    "a USNG/MGRS grid reference, geohash ('geohash:gcpvj' if it has "
+                    "no digit or has capitals), H3 or Plus Code."
                 )
             ),
         ],
@@ -714,7 +724,7 @@ def _register_places(mcp: MCPServer) -> None:
             address=raw["address"],
             category=raw.get("category"),
             type=raw.get("type"),
-            meta=meta("nominatim", cached=cached),
+            meta=meta("nominatim", cached=cached, resolved=[loc]),
         )
 
     class Place(GeoModel):

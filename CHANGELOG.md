@@ -73,6 +73,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   used for the point, so the tool had no steps to inspect. An operation with
   any datum transformation step, a ballpark offset included, is still never
   counted as exact.
+- A place name spelt only from the geohash alphabet is geocoded, not decoded
+  as a geohash. Any `location` of four or more such characters used to be
+  read as a geohash with no note, so "Denver" became 17.88, -57.86 in the
+  Atlantic, "Bergen" and "Berne" landed in Alaska, and "Sydney", "Perth",
+  "Sweden", "SW19" and the postcode "90210" were misplaced the same way. A
+  bare token is now decoded at once only when it is written the way geohashes
+  are, in lowercase with a digit among the letters, such as `u09tunquc`. Any
+  other token that could be a geohash is looked up as a place first, and
+  `meta.notes` gives the geohash reading and how to ask for it. If no place
+  has the name, the token is read as a geohash, with a note saying so:
+  Nominatim has no place called `gcpvj`, so it is still a cell in London. To
+  skip the lookup, mark the geohash: `geohash:gcpvj`. `coord_describe`, which
+  makes no network call, and the tools that take only coordinates treat such
+  a word as a place name too, and their messages give the marked form; in
+  those tools a geohash in capitals, such as `U09TUNQUC`, needs the mark as
+  well. A postcode district in lowercase, such as `sw19`, still reads as a
+  geohash under this rule, so any unmarked 4-character geohash now comes
+  with a note giving its cell, about 39 km wide, and saying to add the town
+  or country if it is a postcode.
 
 ## [0.1.0]
 

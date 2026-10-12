@@ -6,7 +6,7 @@ import pytest
 
 from geospatial_mcp.errors import GeoInputError
 from geospatial_mcp.geo import geodesy, grid_ref
-from geospatial_mcp.geo.coords import format_dms, parse_location
+from geospatial_mcp.geo.coords import format_dms, looks_like_place_name, parse_location
 
 #: The Eiffel Tower, expressed every way this parser accepts.
 EIFFEL = 48.8584, 2.2945
@@ -22,6 +22,7 @@ class TestPolymorphicParsing:
             ("48°51'30\"N 2°17'40\"E", "dms", 30.0),
             ("31UDQ4825211954", "grid", 2.0),
             ("u09tunquc", "geohash", 5.0),
+            ("geohash:u09tunquc", "geohash", 5.0),
             ("891fb46741bffff", "h3", 200.0),
             ("8FW4V75V+9R6", "pluscode", 5.0),
         ],
@@ -53,6 +54,76 @@ class TestPolymorphicParsing:
         a = parse_location("48°51'30\"N 2°17'40\"E").as_tuple()
         b = parse_location("2°17'40\"E 48°51'30\"N").as_tuple()
         assert a == pytest.approx(b)
+
+
+class TestGeohashOrPlaceName:
+    """A word spelt from the geohash alphabet is a place name first.
+
+    Regression tests. Any 4+ character token made only of geohash characters
+    used to be decoded with no note, so "Denver" landed in the Atlantic at
+    17.88, -57.86, and "Bergen" and "Berne" in Alaska.
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        ["Denver", "Bergen", "Berne", "Sydney", "Perth", "bergen", "denver", "SW19", "90210"],
+    )
+    def test_a_word_that_is_also_a_geohash_is_a_place_name_first(self, text):
+        parsed = parse_location(text)
+        assert parsed.kind == "place_name"
+        assert not parsed.resolved, "must be geocoded, not decoded"
+        assert parsed.ambiguous_geohash
+        assert looks_like_place_name(text)
+
+    @pytest.mark.parametrize("text", ["Málaga", "Malaga", "Berlin", "NYC"])
+    def test_a_name_outside_the_alphabet_is_not_flagged(self, text):
+        parsed = parse_location(text)
+        assert parsed.kind == "place_name"
+        assert not parsed.ambiguous_geohash
+
+    @pytest.mark.parametrize(
+        ("text", "lat", "lon"),
+        [
+            ("u09tunquc", 48.8584, 2.2945),  # the Eiffel Tower, as documented
+            ("eysb3kxmm", 36.6321, -4.5052),  # Málaga
+            ("ezs42", 42.605, -5.603),  # the worked example on Wikipedia's Geohash page
+            ("dr5ru", 40.759, -73.982),  # Manhattan
+        ],
+    )
+    def test_a_lowercase_geohash_with_a_digit_is_decoded_at_once(self, text, lat, lon):
+        parsed = parse_location(text)
+        assert parsed.kind == "geohash"
+        assert not parsed.ambiguous_geohash
+        assert parsed.as_tuple() == pytest.approx((lat, lon), abs=0.01)
+        assert not looks_like_place_name(text)
+
+    @pytest.mark.parametrize(
+        ("text", "lat", "lon"),
+        [
+            ("geohash:gcpvj", 51.526, -0.110),  # London, no digit
+            ("GEOHASH: GCPVJ", 51.526, -0.110),
+            ("geohash:u33d", 52.471, 13.535),  # Berlin
+            ("geohash:s000", 0.088, 0.176),  # has a bare 's', which could look like DMS
+            ("geohash:bergen", 63.932, -146.464),  # marked, so the code wins over the city
+        ],
+    )
+    def test_a_marked_geohash_is_decoded_whatever_it_spells(self, text, lat, lon):
+        parsed = parse_location(text)
+        assert parsed.kind == "geohash"
+        assert parsed.raw == text.strip()
+        assert parsed.as_tuple() == pytest.approx((lat, lon), abs=0.01)
+        assert not looks_like_place_name(text)
+
+    def test_a_marked_geohash_keeps_its_precision(self):
+        assert parse_location("geohash:gcpvj").precision_m == 4890.0
+
+    @pytest.mark.parametrize("text", ["geohash:hello", "geohash:", "geohash:u09tunqucu09t"])
+    def test_a_bad_marked_geohash_names_the_alphabet(self, text):
+        with pytest.raises(GeoInputError) as exc:
+            parse_location(text)
+        message = str(exc.value)
+        assert "a, i, l and o" in message
+        assert "geohash:u09tunquc" in message, "the message must show a valid example"
 
 
 class TestRangeValidation:
