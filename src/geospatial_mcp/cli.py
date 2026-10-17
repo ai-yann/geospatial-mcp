@@ -116,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     # which is the signal that we are inside a managed container.
     host = args.host if "PORT" not in os.environ else "0.0.0.0"
     logger.info("mcp-geospatial %s starting on http://%s:%d/mcp", __version__, host, port)
-    server.settings.host = host  # type: ignore[attr-defined]
-    server.settings.port = port  # type: ignore[attr-defined]
-    server.run(transport="streamable-http")
+    # mcp 2.x takes the bind address as run() arguments. Its settings object no
+    # longer has host or port fields, so assigning them raises ValueError.
+    server.run(transport="streamable-http", host=host, port=port)
     return 0
