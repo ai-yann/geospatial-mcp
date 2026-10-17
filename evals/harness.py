@@ -534,10 +534,15 @@ class OpenCode(Adapter):
                     "enabled": True,
                 }
             }
+        # Switch the built-in tools off in both places. opencode turns "tools" into permission rules,
+        # and an explicit "allow" above outranks them: with only {"*": False}, a "none" run still used
+        # bash and webfetch (opencode 1.19.3, October 2026).
         if condition == "none":
             config["tools"] = {"*": False}
+            config["permission"] = {"*": "deny"}
         elif condition == "mcp-only":
             config["tools"] = dict.fromkeys(self.BUILTIN, False)
+            config["permission"] = dict.fromkeys(self.BUILTIN, "deny")
         # Outside the working directory, so the model never sees its own config.
         (run.root / "opencode.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
         argv = [self.bin, "run", case["prompt"], "--format", "json"]
