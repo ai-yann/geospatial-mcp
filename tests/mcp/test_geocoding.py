@@ -420,7 +420,7 @@ class TestGeohashOrPlaceName:
         with pytest.raises(GeoRateLimited) as exc:
             resolve("gcpvj")
         assert exc.value.retry_after_s == 30
-        assert "Retry after about 30s" in str(exc.value)
+        assert "clear within about 30s" in str(exc.value)
         assert "'geohash:gcpvj'" in str(exc.value)
 
     @pytest.mark.parametrize("text", ["sw19", "ec1v", "u33d"])

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from typing import Any
 
 from . import __version__
 from ._sdk import MCPServer
@@ -61,6 +62,33 @@ def configure_logging(level: str = "INFO") -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
+def _name_rate_limited_tools(server: MCPServer) -> None:
+    """Put each tool's name into the rate-limit errors raised while it runs.
+
+    The SDK wraps whatever a tool raises as ``Error executing tool <name>: <message>``
+    before the model sees it, so the tool's own message is rebuilt here, from the
+    original exception, with the name filled in.
+    """
+    from ._sdk import ToolError
+    from .errors import GeoRateLimited
+
+    for tool in server._tool_manager.list_tools():
+        original, name = tool.run, tool.name
+
+        async def run(*args: Any, _run: Any = original, _name: str = name, **kwargs: Any) -> Any:
+            try:
+                return await _run(*args, **kwargs)
+            except ToolError as exc:
+                cause = exc.__cause__
+                if not isinstance(cause, GeoRateLimited):
+                    raise
+                cause.for_tool(_name)
+                raise ToolError(f"Error executing tool {_name}: {cause}") from cause
+
+        # The SDK's Tool is a pydantic model; bypass its __setattr__ (as trace.py does).
+        object.__setattr__(tool, "run", run)
+
+
 def build_server(toolsets: str | set[str] | None = None) -> MCPServer:
     """Build a server with the requested toolsets registered."""
     requested = toolsets if isinstance(toolsets, str) else None
@@ -83,6 +111,9 @@ def build_server(toolsets: str | set[str] | None = None) -> MCPServer:
     # Generated schemas carry a lot of redundancy that costs context on every
     # turn. See geospatial_mcp.schema for what is removed and why.
     slim_server_schemas(mcp)
+
+    # A rate-limit error names the call to make again. See errors.GeoRateLimited.
+    _name_rate_limited_tools(mcp)
 
     # Opt-in: one JSON line per tool call, for evaluating agents in any harness.
     from .config import settings
