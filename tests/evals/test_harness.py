@@ -241,6 +241,26 @@ class TestEnvironment:
         assert trace.is_absolute()
         assert trace.resolve() == (tmp_path / "results" / "case" / "r1" / "trace.jsonl").resolve()
 
+    def test_opencode_config_path_survives_its_change_of_directory(self, tmp_path, monkeypatch):
+        """opencode resolves OPENCODE_CONFIG against its own working directory: with a relative
+        --out it found no config, so no server (every opencode run in September 2026)."""
+        monkeypatch.chdir(tmp_path)
+        run = harness.RunPaths(Path("results") / "case" / "r1", tmp_path / "scratch")
+        run.create()
+        adapter = harness.OpenCode("opencode", None, {})
+        adapter.command(CASE, run, "mcp", {"command": "uv", "args": [], "env": {}})
+        config = Path(adapter.env(run)["OPENCODE_CONFIG"])
+        assert config.is_absolute()
+        assert (
+            config.resolve() == (tmp_path / "results" / "case" / "r1" / "opencode.json").resolve()
+        )
+        assert config.is_file()
+        assert json.loads(config.read_text())["mcp"]["geospatial"]["timeout"] >= 30_000
+
+    def test_opencode_does_not_read_claude_code_files(self, tmp_path):
+        env = harness.OpenCode("opencode", None, {}).env(harness.RunPaths(tmp_path / "run"))
+        assert env["OPENCODE_DISABLE_CLAUDE_CODE"] == "1"
+
     def test_the_server_is_started_by_module_not_by_command_name(self, tmp_path):
         """The console script was renamed from geospatial-mcp; the module name was not."""
         server = harness._server(CASE, harness.RunPaths(tmp_path / "run"), tmp_path)

@@ -39,10 +39,12 @@ Codex cannot switch its shell off, so it runs mcp and builtin only.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -344,6 +346,10 @@ class Adapter:
         """Harness-specific variables, on top of the whitelist."""
         return {}
 
+    def preflight(self, run: RunPaths, condition: str, env: dict[str, str]) -> bool | None:
+        """Whether the server connects before the run, for harnesses whose transcript doesn't say."""
+        return None
+
 
 class ClaudeCode(Adapter):
     name = "claude-code"
@@ -502,6 +508,8 @@ class OpenCode(Adapter):
     name = "opencode"
     binary = "opencode"
 
+    MCP_STARTUP_TIMEOUT_MS = 30_000
+
     BUILTIN = (
         "bash",
         "edit",
@@ -532,6 +540,9 @@ class OpenCode(Adapter):
                     "command": [server["command"], *server["args"]],
                     "environment": server["env"],
                     "enabled": True,
+                    # How long opencode waits for the server's tool list, in ms (its default is
+                    # 5000). A cold `uv run` can take longer than that before the server answers.
+                    "timeout": self.MCP_STARTUP_TIMEOUT_MS,
                 }
             }
         # Switch the built-in tools off in both places. opencode turns "tools" into permission rules,
@@ -551,7 +562,49 @@ class OpenCode(Adapter):
         return argv
 
     def env(self, run: RunPaths) -> dict[str, str]:
-        return {"OPENCODE_CONFIG": str(run.root / "opencode.json")}
+        return {
+            # Absolute. opencode resolves a relative OPENCODE_CONFIG against its own working
+            # directory, the run's work dir, where there is no such file, and then runs with no
+            # config at all and no warning. In September 2026 run-batch.sh passed a relative --out,
+            # so every opencode run had no server ("No MCP servers configured"; opencode 1.18.33
+            # and 1.19.3 both do this). The stage passed an absolute --out and was unaffected.
+            "OPENCODE_CONFIG": str((run.root / "opencode.json").absolute()),
+            # opencode also reads Claude Code's files: ~/.claude/CLAUDE.md and the skills in every
+            # .claude/ folder above the working directory, which the default work root has.
+            "OPENCODE_DISABLE_CLAUDE_CODE": "1",
+            # No self-update in the middle of a batch.
+            "OPENCODE_DISABLE_AUTOUPDATE": "1",
+        }
+
+    def preflight(self, run: RunPaths, condition: str, env: dict[str, str]) -> bool | None:
+        """Ask opencode, with the run's own config and environment, whether the server connects.
+
+        `opencode run` says nothing when a configured server is missing or fails to start, so
+        without this a run with no server looks like a run whose model ignored it. The output
+        is kept as mcp-list.txt.
+        """
+        if condition not in WITH_SERVER:
+            return None
+        try:
+            done = subprocess.run(
+                [self.bin, "mcp", "list"],
+                cwd=run.work,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=self.MCP_STARTUP_TIMEOUT_MS / 1000 + 60,
+                check=False,
+            )
+            text = done.stdout + done.stderr
+        except subprocess.TimeoutExpired:
+            text = "opencode mcp list timed out"
+        text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+        (run.root / "mcp-list.txt").write_text(text, encoding="utf-8")
+        return any(
+            f"✓ {MCP_NAME}" in line and "connected" in line and "disconnected" not in line
+            for line in text.splitlines()
+        )
 
     def parse(self, run):
         parsed = Parsed()
@@ -646,6 +699,22 @@ def _environment(adapter: Adapter, run: RunPaths) -> dict[str, str]:
     return env
 
 
+def _stop_group(proc: subprocess.Popen[Any]) -> None:
+    """Stop a run's process group: whatever is still running after it finished, or all of it on
+    a timeout. TERM first, then KILL."""
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass  # the whole group has already exited
+    else:
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=5)
+        time.sleep(1)
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait()
+
+
 def run_case(
     adapter: Adapter,
     case: dict[str, Any],
@@ -676,24 +745,32 @@ def run_case(
     if extra:
         # Before the prompt for Codex, whose prompt is the last positional.
         argv = [*argv[:-1], *extra, argv[-1]] if adapter.name == "codex" else [*argv, *extra]
+    env = _environment(adapter, run)
+    connected = adapter.preflight(run, condition, env)
     started = time.monotonic()
     timed_out = False
     with run.transcript.open("w") as stdout, run.stderr.open("w") as stderr:
+        # In its own process group, so a hung run is stopped with everything it started (the
+        # server, shells), not only the harness's own process.
+        proc = subprocess.Popen(
+            argv,
+            cwd=run.work,
+            env=env,
+            stdin=subprocess.DEVNULL,  # an open stdin stalls some harnesses
+            stdout=stdout,
+            stderr=stderr,
+            start_new_session=True,
+        )
         try:
-            subprocess.run(
-                argv,
-                cwd=run.work,
-                env=_environment(adapter, run),
-                stdin=subprocess.DEVNULL,  # an open stdin stalls some harnesses
-                stdout=stdout,
-                stderr=stderr,
-                timeout=timeout_s,
-                check=False,
-            )
+            proc.wait(timeout=timeout_s)
         except subprocess.TimeoutExpired:
             timed_out = True
-    duration = time.monotonic() - started
+        finally:
+            duration = time.monotonic() - started
+            _stop_group(proc)
     parsed = adapter.parse(run)
+    if parsed.server_connected is None:
+        parsed.server_connected = connected
     if timed_out:
         parsed.error = f"timed out after {timeout_s:.0f}s"
     run.final.write_text(parsed.final_text, encoding="utf-8")
@@ -1031,9 +1108,12 @@ def main() -> int:
                     verdict = "FAIL" if record["scored"] else "----"
                 detail = record["error"] or record.get("answer_detail") or ""
                 tools = ",".join(record["called_tools"]) or "-"
+                # Flag a run whose server never connected: its tool score says nothing about the model.
+                server = " NO-SERVER" if record.get("server_connected") is False else ""
                 print(
-                    f"  {verdict} {case['id']:36} r{k} {record['duration_s']:>6.1f}s "
-                    f"tools={tools[:60]} {detail[:60]}"
+                    f"  {verdict} {case['id']:36} r{k} {record['duration_s']:>6.1f}s{server} "
+                    f"tools={tools[:60]} {detail[:60]}",
+                    flush=True,
                 )
 
     summary = summarise(records)
