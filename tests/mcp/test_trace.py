@@ -328,7 +328,9 @@ class TestPreviewContents:
 class TestTraceSwitch:
     def test_off_by_default(self):
         server = build_server("default")
-        assert all("run" not in vars(t) for t in server._tool_manager.list_tools())
+        # Every tool's run is wrapped once to name rate-limited calls (server.py); none by the tracer.
+        runs = [vars(t).get("run") for t in server._tool_manager.list_tools()]
+        assert not any(getattr(r, "__name__", "") == "traced_run" for r in runs)
 
     async def test_geo_trace_file_turns_it_on(self, tmp_path):
         trace = tmp_path / "from-env.jsonl"

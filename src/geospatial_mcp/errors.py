@@ -84,22 +84,37 @@ class GeoUpstreamError(GeoError):
 
 
 class GeoRateLimited(GeoUpstreamError):
-    """An upstream provider rate-limited us.
+    """An upstream provider rate-limited us, after the HTTP client's own retries.
 
-    Carries ``retry_after_s`` so the message can tell the model how long to
-    wait rather than leaving it to guess or spin.
+    The message names a call the model can make, not a wait: most agents have no
+    way to wait a minute, and an error that asks for something the caller can't
+    do gets ignored or abandoned. The server adds the tool's name as the error
+    passes through it (``server._name_rate_limited_tools``). ``retry_after_s``
+    stays in the message for callers that can wait.
     """
 
     def __init__(self, provider: str, retry_after_s: float | None = None) -> None:
         self.provider = provider
         self.retry_after_s = retry_after_s
-        wait = (
-            f" Retry after about {retry_after_s:.0f}s." if retry_after_s else " Retry in a minute."
+        self.tool: str | None = None
+        clears = (
+            f" The limit should clear within about {retry_after_s:.0f}s." if retry_after_s else ""
         )
         super().__init__(
-            f"{provider} rate-limited this request.{wait}"
-            " Results are cached, so repeating an identical earlier query is free."
+            f"{provider} rate-limited this request.{clears} Call {_SAME_TOOL} again with the"
+            " same arguments, one call at a time. Repeating an identical earlier query is"
+            " free: results are cached."
         )
+
+    def for_tool(self, name: str) -> None:
+        """Name the tool to call again, keeping anything added to the message since."""
+        if self.tool is None:
+            self.tool = name
+            self.args = (str(self).replace(_SAME_TOOL, name, 1),)
+
+
+#: Stands in for the tool's name until the server fills it in.
+_SAME_TOOL = "the same tool"
 
 
 class GeoNoResults(GeoError):
