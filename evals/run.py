@@ -96,7 +96,7 @@ class CaseResult:
 
 
 def load_cases(filter_text: str | None, include_network: bool) -> list[dict[str, Any]]:
-    cases = yaml.safe_load(LIBRARY.read_text())["cases"]
+    cases = yaml.safe_load(LIBRARY.read_text(encoding="utf-8"))["cases"]
     if filter_text:
         needle = filter_text.lower()
         cases = [
