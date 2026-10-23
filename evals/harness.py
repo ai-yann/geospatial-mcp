@@ -898,6 +898,9 @@ def summarise(records: list[dict[str, Any]]) -> dict[str, Any]:
         "answer_ok": _rate(r["answer_ok"] for r in answered),
         "used_shell": _rate(r["used_shell"] for r in records),
         "harness_errors": sum(1 for r in records if r.get("error")),
+        # Runs whose server was attached but never connected: their tool scores say nothing
+        # about the model. None means the harness could not tell (Codex).
+        "server_not_connected": sum(1 for r in records if r.get("server_connected") is False),
         "contaminated_runs": sum(1 for r in records if r.get("contaminated")),
         "upstream_outages": sum(1 for r in records if r.get("upstream_outage")),
         "mean_duration_s": _mean(r["duration_s"] for r in records),

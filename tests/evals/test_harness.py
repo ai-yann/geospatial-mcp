@@ -148,6 +148,21 @@ class TestSummary:
         assert summary["pass_all_repeats"] == 0.5
         assert summary["by_case"] == {"a": "1/2", "b": "1/1"}
 
+    def test_runs_whose_server_never_connected_are_counted(self):
+        base = {
+            "case_id": "a",
+            "scored": True,
+            "passed": False,
+            "duration_s": 1.0,
+            "used_shell": False,
+        }
+        records = [
+            {**base, "server_connected": False},
+            {**base, "server_connected": True},
+            {**base, "server_connected": None},  # the harness could not tell
+        ]
+        assert harness.summarise(records)["server_not_connected"] == 1
+
 
 class TestIsolation:
     def test_agents_work_outside_the_repository_by_default(self, tmp_path):

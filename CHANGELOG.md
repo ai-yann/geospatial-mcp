@@ -66,6 +66,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The eval harness's opencode runs have the server. opencode resolved the
+  relative config path a relative `--out` produced against its own working
+  directory, found nothing and ran with no config, so no opencode run recorded
+  in September 2026 had the server. Every path argument is now made absolute
+  before a harness sees it. Before each with-server opencode run,
+  `opencode mcp list` checks that the server connects; each run records
+  `server_connected`, and `summary.json` counts the runs without it as
+  `server_not_connected`. opencode's built-in tools are also denied in its
+  permissions for the `none` and `mcp-only` conditions, which a `tools` switch
+  alone did not do.
 - Error messages reach the model with every `mcp` 2.x. From `mcp` 2.1 the SDK
   tells the model only `Error executing tool <name>` when a tool raises
   anything other than a `ToolError`, so on a fresh install every input error,

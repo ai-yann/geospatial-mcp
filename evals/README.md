@@ -37,11 +37,42 @@ uv run python evals/run.py --mode agent --model claude-sonnet-5
 uv run python evals/run.py --mode agent --filter telecom   # one persona
 ```
 
+## Three checks on the runner itself
+
+Each of these was learned from a result that turned out to be wrong.
+
+**The answer's headline, not any number in it.** Each entry in a case's
+`answer.numbers` is compared with one figure: the first number in the entry's
+`unit` (`km2`, `km`, `m` or `%`) that the answer puts in bold or, if it puts
+none in bold, the first number in that unit. A number on either side of a
+multiplication or division is working, not a result, and is skipped. When an
+answer may give two figures in the same unit, such as a total and the area of
+one cell, `about` (a regex) names the quantity: a figure counts only if one of
+those words is nearer to it than to any other figure on the line, and within
+60 characters. Until October 2026 any number within tolerance passed. An answer
+that led with 106.8 km² (four hexagons) passed on a 128.7 km² in an aside, and
+"100 m (330 ft) above the river" passed an elevation of 306 ± 150 m on its feet.
+
+**A work folder whose name says nothing.** The default work root is
+`~/.cache/agent-runs`, and each run works in a fresh `run-XXXXXXXX/work` below
+it. It was `~/.cache/geospatial-evals`, and the model reads that name: see
+"Where runs work". `--work-root ~/.cache/geospatial-evals` reproduces it, to
+compare with the runs recorded there.
+
+**The server is there.** Each run with the server attached records
+`server_connected`: Claude Code's from its init event, opencode's from
+`opencode mcp list`, run with the run's own config and environment just before
+the run and kept as `mcp-list.txt`. The progress line flags `NO-SERVER`, and
+`summary.json` counts those runs as `server_not_connected`. Codex does not say,
+so its runs record `null`. In September 2026 a relative `--out` left every
+opencode run without the server, and nothing said so; the runner now makes
+every path absolute before a harness sees one.
+
 ## Where runs work
 
 Each run's working directory and HOME are made in a fresh directory under the
 work root. Set it with `--work-root` (formerly `--scratch`, which still works)
-or `GEO_EVALS_WORK_ROOT`. The default is `~/.cache/geospatial-evals`.
+or `GEO_EVALS_WORK_ROOT`. The default is `~/.cache/agent-runs`.
 
 Use a work root outside your home folder, with a name that says nothing about
 the tools, the server or the subject, such as `/Users/Shared/agent-runs` on
@@ -84,10 +115,11 @@ that starts this server's tool names, such as `rf`, `coord` or `terrain` (but
 not `data` or `env`, which name ordinary folders). Only whole words count, so
 `george` does not. It lists them in `summary.json` under `work_root_hint_words`.
 
-The default work root carries the hint: `~/.cache/geospatial-evals` contains
-"geospatial" and "evals". It stays the default so that new runs compare with
-those recorded under it, and the harness warns when it is used. Pass a neutral
-`--work-root` to measure without the hint.
+The default work root, `~/.cache/agent-runs`, has none of these words. Until
+October 2026 it was `~/.cache/geospatial-evals`, which has two. It is still
+inside the home folder, so on a machine with a `~/.claude` the harness warns
+about what is above it; a work root such as `/Users/Shared/agent-runs` avoids
+both.
 
 ## Coverage axes
 
@@ -134,7 +166,7 @@ Tool calls are read from the server's own trace (`GEO_TRACE_FILE`), which
 records every call as the client sent it, before validation. It is the same
 for every harness, so no harness's log format decides a score.
 
-The runs in `results/` predate three changes to how `harness.py` starts things,
+The runs in `results/` predate four changes to how `harness.py` starts things,
 made in October 2026:
 
 - The server is started as `uv run --directory <server-dir> python -m
@@ -147,6 +179,14 @@ made in October 2026:
 - Codex's `-o` file is an absolute path. Codex used to resolve it against its
   working directory and log "Failed to write last message file", and the final
   answer was then taken from the last agent message instead.
+- opencode's config file is an absolute path. opencode resolved a relative
+  `OPENCODE_CONFIG` against its working directory, found nothing there, and ran
+  with no config and no warning, so no opencode run in September 2026 had the
+  server. Now every path argument is made absolute first.
+
+They were also scored with the earlier answer check, which passed any number
+within tolerance, so their `answer_ok` and `passed` can be higher than the
+headline check gives for the same answers.
 
 They also predate `--work-root`. All 108 Claude Code runs recorded in
 September 2026 (the `cc-*` directories in `results/`) worked under
@@ -172,7 +212,7 @@ results with this in mind.
 | Distractor rate | any `forbid_tools` was called | ≤ 0.05 |
 | Argument validity | calls passing schema validation first try | ≥ 0.95 |
 | Recovery rate | error cases resolved within `max_turns` | ≥ 0.80 |
-| Answer correctness | the case's `answer` checks: patterns, and numbers within tolerance (see `answers.py`) | ≥ 0.85 |
+| Answer correctness | the case's `answer` checks: patterns, and each number's headline figure within tolerance (see `answers.py`) | ≥ 0.85 |
 | Pass every repeat | share of cases passing on all `--repeat` runs (harness runner) | reported |
 
 When a case fails, the fix is usually a tool *description*, not code. Feed the
