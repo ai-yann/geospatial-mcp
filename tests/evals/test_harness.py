@@ -210,6 +210,16 @@ class TestEnvironment:
         assert env["CODEX_API_KEY"] == "sk-test"
         assert env["HOME"] == str(run.home)
 
+    def test_each_run_has_its_own_temporary_directory(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TMPDIR", "/tmp")
+        first, second = harness.RunPaths(tmp_path / "a"), harness.RunPaths(tmp_path / "b")
+        for run in (first, second):
+            run.create()
+        envs = [harness._environment(harness.Codex(None, None, {}), run) for run in (first, second)]
+        assert envs[0]["TMPDIR"] == str(first.tmp) and first.tmp.is_dir()
+        assert envs[0]["TMPDIR"] != envs[1]["TMPDIR"]
+        assert envs[0]["TMP"] == envs[0]["TEMP"] == envs[0]["TMPDIR"]
+
     def test_a_subscription_login_is_carried_into_each_run(self, tmp_path, monkeypatch):
         auth_home = tmp_path / "codex-auth"
         auth_home.mkdir()

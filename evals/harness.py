@@ -207,6 +207,12 @@ class RunPaths:
         return (self.scratch or self.root) / "home"
 
     @property
+    def tmp(self) -> Path:
+        """The run's own temporary directory. With the shared /tmp, a run read files that an
+        earlier run had saved there (opencode's /tmp/opencode, 23 Oct)."""
+        return (self.scratch or self.root) / "tmp"
+
+    @property
     def trace(self) -> Path:
         return self.root / "trace.jsonl"
 
@@ -224,7 +230,7 @@ class RunPaths:
 
     def create(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        for path in (self.work, self.home):
+        for path in (self.work, self.home, self.tmp):
             path.mkdir(parents=True, exist_ok=True)
 
 
@@ -700,6 +706,8 @@ def _environment(adapter: Adapter, run: RunPaths) -> dict[str, str]:
         p for p in env.get("PATH", "").split(os.pathsep) if not p.startswith(str(REPO_ROOT))
     )
     env["HOME"] = str(run.home)
+    for name in ("TMPDIR", "TMP", "TEMP"):
+        env[name] = str(run.tmp)
     env.setdefault("UV_CACHE_DIR", str(Path.home() / ".cache" / "uv"))
     env.update(adapter.env(run))
     return env
