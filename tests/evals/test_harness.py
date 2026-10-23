@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -147,6 +148,21 @@ class TestSummary:
         assert summary["pass_all_repeats"] == 0.5
         assert summary["by_case"] == {"a": "1/2", "b": "1/1"}
 
+    def test_runs_whose_server_never_connected_are_counted(self):
+        base = {
+            "case_id": "a",
+            "scored": True,
+            "passed": False,
+            "duration_s": 1.0,
+            "used_shell": False,
+        }
+        records = [
+            {**base, "server_connected": False},
+            {**base, "server_connected": True},
+            {**base, "server_connected": None},  # the harness could not tell
+        ]
+        assert harness.summarise(records)["server_not_connected"] == 1
+
 
 class TestIsolation:
     def test_agents_work_outside_the_repository_by_default(self, tmp_path):
@@ -193,6 +209,16 @@ class TestEnvironment:
         assert env["OPENAI_API_KEY"] == "sk-test"
         assert env["CODEX_API_KEY"] == "sk-test"
         assert env["HOME"] == str(run.home)
+
+    def test_each_run_has_its_own_temporary_directory(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TMPDIR", "/tmp")
+        first, second = harness.RunPaths(tmp_path / "a"), harness.RunPaths(tmp_path / "b")
+        for run in (first, second):
+            run.create()
+        envs = [harness._environment(harness.Codex(None, None, {}), run) for run in (first, second)]
+        assert envs[0]["TMPDIR"] == str(first.tmp) and first.tmp.is_dir()
+        assert envs[0]["TMPDIR"] != envs[1]["TMPDIR"]
+        assert envs[0]["TMP"] == envs[0]["TEMP"] == envs[0]["TMPDIR"]
 
     def test_a_subscription_login_is_carried_into_each_run(self, tmp_path, monkeypatch):
         auth_home = tmp_path / "codex-auth"
@@ -241,6 +267,26 @@ class TestEnvironment:
         assert trace.is_absolute()
         assert trace.resolve() == (tmp_path / "results" / "case" / "r1" / "trace.jsonl").resolve()
 
+    def test_opencode_config_path_survives_its_change_of_directory(self, tmp_path, monkeypatch):
+        """opencode resolves OPENCODE_CONFIG against its own working directory: with a relative
+        --out it found no config, so no server (every opencode run in September 2026)."""
+        monkeypatch.chdir(tmp_path)
+        run = harness.RunPaths(Path("results") / "case" / "r1", tmp_path / "scratch")
+        run.create()
+        adapter = harness.OpenCode("opencode", None, {})
+        adapter.command(CASE, run, "mcp", {"command": "uv", "args": [], "env": {}})
+        config = Path(adapter.env(run)["OPENCODE_CONFIG"])
+        assert config.is_absolute()
+        assert (
+            config.resolve() == (tmp_path / "results" / "case" / "r1" / "opencode.json").resolve()
+        )
+        assert config.is_file()
+        assert json.loads(config.read_text())["mcp"]["geospatial"]["timeout"] >= 30_000
+
+    def test_opencode_does_not_read_claude_code_files(self, tmp_path):
+        env = harness.OpenCode("opencode", None, {}).env(harness.RunPaths(tmp_path / "run"))
+        assert env["OPENCODE_DISABLE_CLAUDE_CODE"] == "1"
+
     def test_the_server_is_started_by_module_not_by_command_name(self, tmp_path):
         """The console script was renamed from geospatial-mcp; the module name was not."""
         server = harness._server(CASE, harness.RunPaths(tmp_path / "run"), tmp_path)
@@ -263,6 +309,102 @@ class _WhereAmI(harness.Adapter):
         return harness.Parsed(final_text=run.transcript.read_text(encoding="utf-8").strip())
 
 
+class TestRelativePaths:
+    """A relative --out sent opencode to look for its config under the run's work dir, so in
+    September 2026 no opencode run had the server. Every path is made absolute up front."""
+
+    def test_every_path_argument_is_made_absolute(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        argv = ["--harness", "opencode", "--out", "results/oc", "--work-root", "runs"]
+        argv += ["--server-dir", ".", "--instructions", "AGENTS.md", "--bin", "bin/opencode"]
+        args = harness.build_parser().parse_args(argv)
+        harness.make_paths_absolute(args)
+        here = tmp_path.resolve()
+        assert args.out == here / "results" / "oc"
+        assert args.work_root == here / "runs"
+        assert args.server_dir == here
+        assert args.instructions == here / "AGENTS.md"
+        assert args.bin == str(here / "bin" / "opencode")
+
+    def test_a_bare_harness_name_is_left_for_path_to_find(self):
+        args = harness.build_parser().parse_args(["--harness", "opencode", "--bin", "opencode"])
+        harness.make_paths_absolute(args)
+        assert args.bin == "opencode"
+
+    def test_a_relative_out_reaches_the_harness_as_an_absolute_path(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setitem(harness.ADAPTERS, _WhereAmI.name, _WhereAmI)
+        argv = ["harness.py", "--harness", _WhereAmI.name, "--condition", "builtin"]
+        argv += ["--prompt", "Where are you?", "--out", "results/x", "--work-root", "runs"]
+        monkeypatch.setattr(sys, "argv", argv)
+
+        assert harness.main() == 0
+
+        out = tmp_path.resolve() / "results" / "x"
+        record = json.loads((out / "results.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        assert Path(record["run_dir"]).is_absolute()
+        assert Path(record["run_dir"]).is_relative_to(out)
+        assert Path(json.loads(record["final_text"])["home"]).is_absolute()
+        summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+        assert summary["args"]["out"] == str(out)
+
+    def test_run_case_makes_relative_paths_absolute_itself(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        record = harness.run_case(
+            _WhereAmI(None, None, {}),
+            CASE,
+            "builtin",
+            1,
+            Path("results"),
+            tmp_path,
+            30.0,
+            Path("runs"),
+        )
+        assert Path(record["run_dir"]).is_absolute()
+        assert Path(json.loads(record["final_text"])["home"]).is_absolute()
+
+
+class _Hangs(harness.Adapter):
+    """A stand-in harness that never finishes."""
+
+    name = "hangs"
+
+    def command(self, case, run, condition, server):
+        return [sys.executable, "-c", "import time; time.sleep(60)"]
+
+    def parse(self, run):
+        return harness.Parsed()
+
+
+class TestStopping:
+    """Each run is its own process group, stopped as a whole: but not every OS has groups."""
+
+    @pytest.mark.parametrize("process_groups", [True, False])
+    def test_a_run_that_hangs_is_stopped_at_its_timeout(
+        self, tmp_path, monkeypatch, process_groups
+    ):
+        if not process_groups:  # as on Windows, where CI runs these tests too
+            monkeypatch.delattr(harness.os, "killpg", raising=False)
+        elif not hasattr(harness.os, "killpg"):
+            pytest.skip("this OS has no process groups")
+        started = time.monotonic()
+        record = harness.run_case(
+            _Hangs(None, None, {}),
+            CASE,
+            "builtin",
+            1,
+            tmp_path / "out",
+            tmp_path,
+            0.5,
+            tmp_path / "w",
+        )
+        assert record["error"].startswith("timed out")
+        assert not record["passed"]
+        assert time.monotonic() - started < 30
+
+
 class TestWorkRoot:
     """Runs can be moved out of the home folder, whose .claude/ Claude Code reads.
 
@@ -270,10 +412,11 @@ class TestWorkRoot:
     ~/.cache/geospatial-evals and listed the operator's own skills and agents.
     """
 
-    def test_the_default_is_unchanged(self, monkeypatch):
+    def test_the_default_has_a_neutral_name(self, monkeypatch):
+        """It was ~/.cache/geospatial-evals until October 2026."""
         monkeypatch.delenv(harness.WORK_ROOT_ENV, raising=False)
         args = harness.build_parser().parse_args(["--harness", "codex"])
-        assert args.work_root == Path.home() / ".cache" / "geospatial-evals"
+        assert args.work_root == Path.home() / ".cache" / "agent-runs"
 
     def test_the_environment_variable_moves_it(self, monkeypatch, tmp_path):
         monkeypatch.setenv(harness.WORK_ROOT_ENV, str(tmp_path / "shared"))
@@ -369,8 +512,9 @@ class TestWorkRootName:
     def test_a_neutral_path_is_not_flagged(self, path):
         assert harness.work_root_hint_words(Path(path)) == []
 
-    def test_the_default_carries_the_hint(self):
-        assert "geospatial" in harness.work_root_hint_words(harness.DEFAULT_WORK_ROOT)
+    def test_the_old_default_carried_the_hint(self):
+        old = Path.home() / ".cache" / "geospatial-evals"
+        assert "geospatial" in harness.work_root_hint_words(old)
 
     def test_the_recommended_example_is_neutral(self):
         assert harness.work_root_hint_words(Path(harness.NEUTRAL_WORK_ROOT_EXAMPLE)) == []
@@ -394,12 +538,14 @@ class TestWorkRootName:
         assert "--work-root" in err
         assert harness.WORK_ROOT_ENV in err
         assert harness.NEUTRAL_WORK_ROOT_EXAMPLE in err
-        # It says the default has the hint too, rather than only blaming the flag.
+        # It points at the neutral default as the way out.
         assert str(harness.DEFAULT_WORK_ROOT) in err
 
-    def test_the_default_is_warned_about_as_the_default(self, capsys):
-        harness.warn_about_hint_words(harness.DEFAULT_WORK_ROOT)
-        assert "This is the default work root." in capsys.readouterr().err
+    def test_the_default_is_not_warned_about(self, capsys):
+        # Under a neutral home folder: the real one's path is not this test's to choose.
+        default = Path("/Users/someone") / harness.DEFAULT_WORK_ROOT.relative_to(Path.home())
+        assert harness.warn_about_hint_words(default) == []
+        assert capsys.readouterr().err == ""
 
     def test_a_neutral_work_root_is_not_warned_about(self, capsys):
         assert harness.warn_about_hint_words(Path("/Users/Shared/agent-runs")) == []

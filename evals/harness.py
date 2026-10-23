@@ -10,12 +10,13 @@ running the harness answers it.
 Every run gets a fresh working directory and HOME, and a whitelisted
 environment: only the variables in ``PASSTHROUGH`` and ``PROVIDER_KEYS``
 reach the harness, so no ambient credential in the calling shell is used by
-accident. Both directories are made under the work root (``--work-root``).
-Keep it outside your home folder, because Claude Code also reads the .claude/
-folder and CLAUDE.md of every directory above its working directory. And give
-it a name that says nothing about the tools, because Claude Code shows the
-model its working directory: on one case, a folder named geospatial-evals
-changed whether the model used them (see :data:`HINT_WORDS`).
+accident. Both directories are made under the work root (``--work-root``,
+default ~/.cache/agent-runs). Keep it outside your home folder, because Claude
+Code also reads the .claude/ folder and CLAUDE.md of every directory above its
+working directory. And give it a name that says nothing about the tools,
+because Claude Code shows the model its working directory: on one case, a
+folder named geospatial-evals changed whether the model used them (see
+:data:`HINT_WORDS`).
 
 Tool calls come from the server's own trace (``GEO_TRACE_FILE``), identical
 for every harness; the transcript supplies the final answer, the harness's
@@ -39,10 +40,12 @@ Codex cannot switch its shell off, so it runs mcp and builtin only.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -102,12 +105,21 @@ WITH_SERVER = ("mcp", "mcp-only")
 SERVER_MARKERS = ("geospatial_mcp", "geospatial-mcp", "mcp-geospatial")
 
 #: Where each run's working directory and HOME are made, unless --work-root or
-#: GEO_EVALS_WORK_ROOT says otherwise. Not under /tmp: Codex refuses to install
-#: its helper binaries there. It is inside the home folder, which a harness can
-#: see from below (see :func:`inherited_agent_config`), and its name carries
-#: "geospatial" and "evals", which the model sees (see :func:`work_root_hint_words`).
-#: It stays the default so that new runs compare with the ones recorded under it.
-DEFAULT_WORK_ROOT = Path.home() / ".cache" / "geospatial-evals"
+#: GEO_EVALS_WORK_ROOT says otherwise. Each run works in a fresh run-XXXXXXXX/work
+#: below it. Not under /tmp: Codex refuses to install its helper binaries there.
+#:
+#: The name says nothing about the server, because the model sees its working
+#: directory. Until October 2026 the default was ~/.cache/geospatial-evals, and
+#: on telecom-cell-area-sum-007 (Sonnet 5.5 in Claude Code) runs under a folder
+#: named geospatial-evals called rf_link_budget in 6 of 11 runs, and runs under
+#: neutral folders in 0 of 20 (see :data:`HINT_WORDS`). A runner whose default
+#: hints at the tools measures the hint. To compare with runs recorded under the
+#: old folder, pass --work-root ~/.cache/geospatial-evals.
+#:
+#: It is still inside the home folder, which Claude Code reads from below (see
+#: :func:`inherited_agent_config`), so the harness warns when ~/.claude exists;
+#: a work root outside it, such as /Users/Shared/agent-runs, avoids that too.
+DEFAULT_WORK_ROOT = Path.home() / ".cache" / "agent-runs"
 
 #: The variable that moves the work root without a command-line flag.
 WORK_ROOT_ENV = "GEO_EVALS_WORK_ROOT"
@@ -195,6 +207,12 @@ class RunPaths:
         return (self.scratch or self.root) / "home"
 
     @property
+    def tmp(self) -> Path:
+        """The run's own temporary directory. With the shared /tmp, a run read files that an
+        earlier run had saved there (opencode's /tmp/opencode, 23 Oct)."""
+        return (self.scratch or self.root) / "tmp"
+
+    @property
     def trace(self) -> Path:
         return self.root / "trace.jsonl"
 
@@ -212,7 +230,7 @@ class RunPaths:
 
     def create(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        for path in (self.work, self.home):
+        for path in (self.work, self.home, self.tmp):
             path.mkdir(parents=True, exist_ok=True)
 
 
@@ -280,19 +298,15 @@ def warn_about_hint_words(work_root: Path) -> list[str]:
     words = work_root_hint_words(work_root)
     if words:
         listed = ", ".join(f'"{word}"' for word in words)
-        if work_root.expanduser().absolute() == DEFAULT_WORK_ROOT.absolute():
-            default = "This is the default work root."
-        else:
-            default = f"The default work root, {DEFAULT_WORK_ROOT}, has the hint too."
         print(
             f"warning: the work root {work_root} contains {listed}, which could tell the model "
             "what is being tested.\n"
             "Claude Code shows the model its working directory. On one case with Sonnet 5.5 "
             "(October 2026), runs under /Users/Shared/geospatial-evals used the expected tool "
             "in 6 of 11 runs, and runs under neutral folders in 0 of 20.\n"
-            f"{default} It stays the default so that new runs compare with those recorded under it. "
-            f"To measure without the hint, use --work-root or {WORK_ROOT_ENV} with a neutral "
-            f"name, e.g. {NEUTRAL_WORK_ROOT_EXAMPLE}.",
+            f"To measure without the hint, leave out --work-root and {WORK_ROOT_ENV} for the "
+            f"neutral default, {DEFAULT_WORK_ROOT}, or give a neutral name, "
+            f"e.g. {NEUTRAL_WORK_ROOT_EXAMPLE}.",
             file=sys.stderr,
         )
     return words
@@ -343,6 +357,10 @@ class Adapter:
     def env(self, run: RunPaths) -> dict[str, str]:
         """Harness-specific variables, on top of the whitelist."""
         return {}
+
+    def preflight(self, run: RunPaths, condition: str, env: dict[str, str]) -> bool | None:
+        """Whether the server connects before the run, for harnesses whose transcript doesn't say."""
+        return None
 
 
 class ClaudeCode(Adapter):
@@ -502,6 +520,8 @@ class OpenCode(Adapter):
     name = "opencode"
     binary = "opencode"
 
+    MCP_STARTUP_TIMEOUT_MS = 30_000
+
     BUILTIN = (
         "bash",
         "edit",
@@ -532,12 +552,20 @@ class OpenCode(Adapter):
                     "command": [server["command"], *server["args"]],
                     "environment": server["env"],
                     "enabled": True,
+                    # How long opencode waits for the server's tool list, in ms (its default is
+                    # 5000). A cold `uv run` can take longer than that before the server answers.
+                    "timeout": self.MCP_STARTUP_TIMEOUT_MS,
                 }
             }
+        # Switch the built-in tools off in both places. opencode turns "tools" into permission rules,
+        # and an explicit "allow" above outranks them: with only {"*": False}, a "none" run still used
+        # bash and webfetch (opencode 1.19.3, October 2026).
         if condition == "none":
             config["tools"] = {"*": False}
+            config["permission"] = {"*": "deny"}
         elif condition == "mcp-only":
             config["tools"] = dict.fromkeys(self.BUILTIN, False)
+            config["permission"] = dict.fromkeys(self.BUILTIN, "deny")
         # Outside the working directory, so the model never sees its own config.
         (run.root / "opencode.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
         argv = [self.bin, "run", case["prompt"], "--format", "json"]
@@ -546,7 +574,49 @@ class OpenCode(Adapter):
         return argv
 
     def env(self, run: RunPaths) -> dict[str, str]:
-        return {"OPENCODE_CONFIG": str(run.root / "opencode.json")}
+        return {
+            # Absolute. opencode resolves a relative OPENCODE_CONFIG against its own working
+            # directory, the run's work dir, where there is no such file, and then runs with no
+            # config at all and no warning. In September 2026 run-batch.sh passed a relative --out,
+            # so every opencode run had no server ("No MCP servers configured"; opencode 1.18.33
+            # and 1.19.3 both do this). The stage passed an absolute --out and was unaffected.
+            "OPENCODE_CONFIG": str((run.root / "opencode.json").absolute()),
+            # opencode also reads Claude Code's files: ~/.claude/CLAUDE.md and the skills in every
+            # .claude/ folder above the working directory, which the default work root has.
+            "OPENCODE_DISABLE_CLAUDE_CODE": "1",
+            # No self-update in the middle of a batch.
+            "OPENCODE_DISABLE_AUTOUPDATE": "1",
+        }
+
+    def preflight(self, run: RunPaths, condition: str, env: dict[str, str]) -> bool | None:
+        """Ask opencode, with the run's own config and environment, whether the server connects.
+
+        `opencode run` says nothing when a configured server is missing or fails to start, so
+        without this a run with no server looks like a run whose model ignored it. The output
+        is kept as mcp-list.txt.
+        """
+        if condition not in WITH_SERVER:
+            return None
+        try:
+            done = subprocess.run(
+                [self.bin, "mcp", "list"],
+                cwd=run.work,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=self.MCP_STARTUP_TIMEOUT_MS / 1000 + 60,
+                check=False,
+            )
+            text = done.stdout + done.stderr
+        except subprocess.TimeoutExpired:
+            text = "opencode mcp list timed out"
+        text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+        (run.root / "mcp-list.txt").write_text(text, encoding="utf-8")
+        return any(
+            f"✓ {MCP_NAME}" in line and "connected" in line and "disconnected" not in line
+            for line in text.splitlines()
+        )
 
     def parse(self, run):
         parsed = Parsed()
@@ -636,9 +706,34 @@ def _environment(adapter: Adapter, run: RunPaths) -> dict[str, str]:
         p for p in env.get("PATH", "").split(os.pathsep) if not p.startswith(str(REPO_ROOT))
     )
     env["HOME"] = str(run.home)
+    for name in ("TMPDIR", "TMP", "TEMP"):
+        env[name] = str(run.tmp)
     env.setdefault("UV_CACHE_DIR", str(Path.home() / ".cache" / "uv"))
     env.update(adapter.env(run))
     return env
+
+
+def _stop_group(proc: subprocess.Popen[Any]) -> None:
+    """Stop a run's process group: whatever is still running after it finished, or all of it on
+    a timeout. TERM first, then KILL."""
+    if not hasattr(os, "killpg"):
+        # Windows has no process groups to signal (start_new_session is ignored there), so
+        # only the harness's own process can be stopped.
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass  # the whole group has already exited
+    else:
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=5)
+        time.sleep(1)
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait()
 
 
 def run_case(
@@ -652,9 +747,12 @@ def run_case(
     work_root: Path,
     instructions: Path | None = None,
 ) -> dict[str, Any]:
-    root = out / case["id"] / f"r{repeat}"
+    # Absolute even when called with relative paths (main makes them so already): every
+    # path below reaches a harness that starts in another directory.
+    root = (out / case["id"] / f"r{repeat}").absolute()
     if root.exists():
         shutil.rmtree(root)
+    work_root = work_root.absolute()
     work_root.mkdir(parents=True, exist_ok=True)
     run = RunPaths(root, Path(tempfile.mkdtemp(prefix="run-", dir=work_root)))
     run.create()
@@ -671,24 +769,32 @@ def run_case(
     if extra:
         # Before the prompt for Codex, whose prompt is the last positional.
         argv = [*argv[:-1], *extra, argv[-1]] if adapter.name == "codex" else [*argv, *extra]
+    env = _environment(adapter, run)
+    connected = adapter.preflight(run, condition, env)
     started = time.monotonic()
     timed_out = False
     with run.transcript.open("w") as stdout, run.stderr.open("w") as stderr:
+        # In its own process group, so a hung run is stopped with everything it started (the
+        # server, shells), not only the harness's own process.
+        proc = subprocess.Popen(
+            argv,
+            cwd=run.work,
+            env=env,
+            stdin=subprocess.DEVNULL,  # an open stdin stalls some harnesses
+            stdout=stdout,
+            stderr=stderr,
+            start_new_session=True,
+        )
         try:
-            subprocess.run(
-                argv,
-                cwd=run.work,
-                env=_environment(adapter, run),
-                stdin=subprocess.DEVNULL,  # an open stdin stalls some harnesses
-                stdout=stdout,
-                stderr=stderr,
-                timeout=timeout_s,
-                check=False,
-            )
+            proc.wait(timeout=timeout_s)
         except subprocess.TimeoutExpired:
             timed_out = True
-    duration = time.monotonic() - started
+        finally:
+            duration = time.monotonic() - started
+            _stop_group(proc)
     parsed = adapter.parse(run)
+    if parsed.server_connected is None:
+        parsed.server_connected = connected
     if timed_out:
         parsed.error = f"timed out after {timeout_s:.0f}s"
     run.final.write_text(parsed.final_text, encoding="utf-8")
@@ -800,6 +906,9 @@ def summarise(records: list[dict[str, Any]]) -> dict[str, Any]:
         "answer_ok": _rate(r["answer_ok"] for r in answered),
         "used_shell": _rate(r["used_shell"] for r in records),
         "harness_errors": sum(1 for r in records if r.get("error")),
+        # Runs whose server was attached but never connected: their tool scores say nothing
+        # about the model. None means the harness could not tell (Codex).
+        "server_not_connected": sum(1 for r in records if r.get("server_connected") is False),
         "contaminated_runs": sum(1 for r in records if r.get("contaminated")),
         "upstream_outages": sum(1 for r in records if r.get("upstream_outage")),
         "mean_duration_s": _mean(r["duration_s"] for r in records),
@@ -930,9 +1039,31 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def make_paths_absolute(args: argparse.Namespace) -> None:
+    """Make every path argument absolute, before anything uses one.
+
+    Each harness starts in its run's own work dir, and a harness may resolve a
+    relative path against that, not against where the runner was started. In
+    September 2026 run-batch.sh passed a relative --out: opencode looked for its
+    config under the work dir, found none, and ran every run with no server,
+    and Codex failed to write its final-message file. Those two paths were fixed
+    one by one; resolving every path here means no harness, present or future,
+    sees a relative one.
+    """
+    for name in ("out", "work_root", "server_dir", "instructions"):
+        value = getattr(args, name)
+        if value is not None:
+            setattr(args, name, Path(value).expanduser().resolve())
+    # A bare command name is looked up on PATH. A relative path to the executable would
+    # be looked up from the run's work dir, which is where the harness is started.
+    if args.bin and any(sep and sep in args.bin for sep in (os.sep, os.altsep)):
+        args.bin = str(Path(args.bin).expanduser().resolve())
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    make_paths_absolute(args)
 
     if args.report:
         return report(args.report)
@@ -1010,7 +1141,7 @@ def main() -> int:
                     args.condition,
                     k,
                     out,
-                    args.server_dir.resolve(),
+                    args.server_dir,
                     args.timeout,
                     args.work_root,
                     args.instructions,
@@ -1026,9 +1157,12 @@ def main() -> int:
                     verdict = "FAIL" if record["scored"] else "----"
                 detail = record["error"] or record.get("answer_detail") or ""
                 tools = ",".join(record["called_tools"]) or "-"
+                # Flag a run whose server never connected: its tool score says nothing about the model.
+                server = " NO-SERVER" if record.get("server_connected") is False else ""
                 print(
-                    f"  {verdict} {case['id']:36} r{k} {record['duration_s']:>6.1f}s "
-                    f"tools={tools[:60]} {detail[:60]}"
+                    f"  {verdict} {case['id']:36} r{k} {record['duration_s']:>6.1f}s{server} "
+                    f"tools={tools[:60]} {detail[:60]}",
+                    flush=True,
                 )
 
     summary = summarise(records)

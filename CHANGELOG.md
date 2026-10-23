@@ -23,13 +23,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/Users/Shared/geospatial-evals` called `rf_link_budget` and passed in 6 of 11
   runs, and runs under neutral folders in 0 of 20. That is one case and one
   model, so how far the effect reaches is not known. `evals/README.md` now
-  recommends a neutral work root such as `/Users/Shared/agent-runs`. The
-  default, `~/.cache/geospatial-evals`, carries the hint but is unchanged, so
-  that new runs compare with the Claude Code runs recorded under it in
-  September 2026, whose tool use the hint may have inflated.
+  recommends a neutral work root such as `/Users/Shared/agent-runs`.
 
 ### Changed
 
+- The eval harness's default work root is `~/.cache/agent-runs`, a name that
+  says nothing about the server. It was `~/.cache/geospatial-evals`, the
+  hinting name above; every run recorded in September 2026 worked under it,
+  so their tool use may be inflated. To compare with them, pass
+  `--work-root ~/.cache/geospatial-evals`.
+
+- The evals' answer check scores each expected number against the answer's
+  headline figure, not against every number in the text. The headline is the
+  first figure in the expected unit that the answer puts in bold, or, with none
+  in bold, the first figure in that unit. Operands of a multiplication or
+  division are skipped, and an optional `about` pattern tells a total from the
+  per-cell figure beside it. Any number within tolerance used to pass, so an
+  answer to `telecom-cell-area-sum-007` that led with 106.8 km² (four hexagons)
+  and gave 128.7 km² in an aside passed, and so did a height of 100 m above a
+  river, on its "330 ft", against an elevation of 306 ± 150 m. Every `numbers`
+  entry in `evals/prompts.yaml` now names its unit.
 - The default `tools/list` is about 16% smaller (47.8k to 40.0k characters).
   Tool descriptions no longer carry docstring indentation, and the `meta`
   definition repeated in every output schema is reduced to a bare object; the
@@ -53,6 +66,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The eval harness's opencode runs have the server. opencode resolved the
+  relative config path a relative `--out` produced against its own working
+  directory, found nothing and ran with no config, so no opencode run recorded
+  in September 2026 had the server. Every path argument is now made absolute
+  before a harness sees it. Before each with-server opencode run,
+  `opencode mcp list` checks that the server connects; each run records
+  `server_connected`, and `summary.json` counts the runs without it as
+  `server_not_connected`. opencode's built-in tools are also denied in its
+  permissions for the `none` and `mcp-only` conditions, which a `tools` switch
+  alone did not do.
 - Error messages reach the model with every `mcp` 2.x. From `mcp` 2.1 the SDK
   tells the model only `Error executing tool <name>` when a tool raises
   anything other than a `ToolError`, so on a fresh install every input error,
