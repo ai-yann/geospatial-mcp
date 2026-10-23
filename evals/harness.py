@@ -732,9 +732,12 @@ def run_case(
     work_root: Path,
     instructions: Path | None = None,
 ) -> dict[str, Any]:
-    root = out / case["id"] / f"r{repeat}"
+    # Absolute even when called with relative paths (main makes them so already): every
+    # path below reaches a harness that starts in another directory.
+    root = (out / case["id"] / f"r{repeat}").absolute()
     if root.exists():
         shutil.rmtree(root)
+    work_root = work_root.absolute()
     work_root.mkdir(parents=True, exist_ok=True)
     run = RunPaths(root, Path(tempfile.mkdtemp(prefix="run-", dir=work_root)))
     run.create()
@@ -1018,9 +1021,31 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def make_paths_absolute(args: argparse.Namespace) -> None:
+    """Make every path argument absolute, before anything uses one.
+
+    Each harness starts in its run's own work dir, and a harness may resolve a
+    relative path against that, not against where the runner was started. In
+    September 2026 run-batch.sh passed a relative --out: opencode looked for its
+    config under the work dir, found none, and ran every run with no server,
+    and Codex failed to write its final-message file. Those two paths were fixed
+    one by one; resolving every path here means no harness, present or future,
+    sees a relative one.
+    """
+    for name in ("out", "work_root", "server_dir", "instructions"):
+        value = getattr(args, name)
+        if value is not None:
+            setattr(args, name, Path(value).expanduser().resolve())
+    # A bare command name is looked up on PATH. A relative path to the executable would
+    # be looked up from the run's work dir, which is where the harness is started.
+    if args.bin and any(sep and sep in args.bin for sep in (os.sep, os.altsep)):
+        args.bin = str(Path(args.bin).expanduser().resolve())
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    make_paths_absolute(args)
 
     if args.report:
         return report(args.report)
@@ -1098,7 +1123,7 @@ def main() -> int:
                     args.condition,
                     k,
                     out,
-                    args.server_dir.resolve(),
+                    args.server_dir,
                     args.timeout,
                     args.work_root,
                     args.instructions,

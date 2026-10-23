@@ -283,6 +283,63 @@ class _WhereAmI(harness.Adapter):
         return harness.Parsed(final_text=run.transcript.read_text(encoding="utf-8").strip())
 
 
+class TestRelativePaths:
+    """A relative --out sent opencode to look for its config under the run's work dir, so in
+    September 2026 no opencode run had the server. Every path is made absolute up front."""
+
+    def test_every_path_argument_is_made_absolute(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        argv = ["--harness", "opencode", "--out", "results/oc", "--work-root", "runs"]
+        argv += ["--server-dir", ".", "--instructions", "AGENTS.md", "--bin", "bin/opencode"]
+        args = harness.build_parser().parse_args(argv)
+        harness.make_paths_absolute(args)
+        here = tmp_path.resolve()
+        assert args.out == here / "results" / "oc"
+        assert args.work_root == here / "runs"
+        assert args.server_dir == here
+        assert args.instructions == here / "AGENTS.md"
+        assert args.bin == str(here / "bin" / "opencode")
+
+    def test_a_bare_harness_name_is_left_for_path_to_find(self):
+        args = harness.build_parser().parse_args(["--harness", "opencode", "--bin", "opencode"])
+        harness.make_paths_absolute(args)
+        assert args.bin == "opencode"
+
+    def test_a_relative_out_reaches_the_harness_as_an_absolute_path(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setitem(harness.ADAPTERS, _WhereAmI.name, _WhereAmI)
+        argv = ["harness.py", "--harness", _WhereAmI.name, "--condition", "builtin"]
+        argv += ["--prompt", "Where are you?", "--out", "results/x", "--work-root", "runs"]
+        monkeypatch.setattr(sys, "argv", argv)
+
+        assert harness.main() == 0
+
+        out = tmp_path.resolve() / "results" / "x"
+        record = json.loads((out / "results.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        assert Path(record["run_dir"]).is_absolute()
+        assert Path(record["run_dir"]).is_relative_to(out)
+        assert Path(json.loads(record["final_text"])["home"]).is_absolute()
+        summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+        assert summary["args"]["out"] == str(out)
+
+    def test_run_case_makes_relative_paths_absolute_itself(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        record = harness.run_case(
+            _WhereAmI(None, None, {}),
+            CASE,
+            "builtin",
+            1,
+            Path("results"),
+            tmp_path,
+            30.0,
+            Path("runs"),
+        )
+        assert Path(record["run_dir"]).is_absolute()
+        assert Path(json.loads(record["final_text"])["home"]).is_absolute()
+
+
 class TestWorkRoot:
     """Runs can be moved out of the home folder, whose .claude/ Claude Code reads.
 
