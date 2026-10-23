@@ -708,6 +708,13 @@ def _environment(adapter: Adapter, run: RunPaths) -> dict[str, str]:
 def _stop_group(proc: subprocess.Popen[Any]) -> None:
     """Stop a run's process group: whatever is still running after it finished, or all of it on
     a timeout. TERM first, then KILL."""
+    if not hasattr(os, "killpg"):
+        # Windows has no process groups to signal (start_new_session is ignored there), so
+        # only the harness's own process can be stopped.
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        return
     try:
         os.killpg(proc.pid, signal.SIGTERM)
     except ProcessLookupError:

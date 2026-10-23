@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -338,6 +339,45 @@ class TestRelativePaths:
         )
         assert Path(record["run_dir"]).is_absolute()
         assert Path(json.loads(record["final_text"])["home"]).is_absolute()
+
+
+class _Hangs(harness.Adapter):
+    """A stand-in harness that never finishes."""
+
+    name = "hangs"
+
+    def command(self, case, run, condition, server):
+        return [sys.executable, "-c", "import time; time.sleep(60)"]
+
+    def parse(self, run):
+        return harness.Parsed()
+
+
+class TestStopping:
+    """Each run is its own process group, stopped as a whole: but not every OS has groups."""
+
+    @pytest.mark.parametrize("process_groups", [True, False])
+    def test_a_run_that_hangs_is_stopped_at_its_timeout(
+        self, tmp_path, monkeypatch, process_groups
+    ):
+        if not process_groups:  # as on Windows, where CI runs these tests too
+            monkeypatch.delattr(harness.os, "killpg", raising=False)
+        elif not hasattr(harness.os, "killpg"):
+            pytest.skip("this OS has no process groups")
+        started = time.monotonic()
+        record = harness.run_case(
+            _Hangs(None, None, {}),
+            CASE,
+            "builtin",
+            1,
+            tmp_path / "out",
+            tmp_path,
+            0.5,
+            tmp_path / "w",
+        )
+        assert record["error"].startswith("timed out")
+        assert not record["passed"]
+        assert time.monotonic() - started < 30
 
 
 class TestWorkRoot:
