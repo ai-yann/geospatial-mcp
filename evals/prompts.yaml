@@ -14,6 +14,12 @@
 #   forbid_tools   near-neighbours that indicate a wrong turn
 #   validate       how the keyless runner checks the chain: tool + args + assertions
 #   rubric         what a correct final answer must contain (agent mode)
+#   answer         deterministic checks on the final answer (evals/answers.py):
+#                  patterns, forbid, and numbers. Each number is checked against
+#                  the answer's headline figure in its unit, so give every one a
+#                  unit, and an `about` regex when the answer may give two
+#                  figures in that unit (a total beside a per-cell area)
+#   artifacts      checks on files the agent writes
 #   network        true if the chain needs live API access
 #   max_turns      turn budget for agent mode
 
@@ -633,7 +639,10 @@ cases:
       args: {location: "36.9320722,-4.7880471", days: 2}
       assert: ["'daily' in result"]
   answer:
-    numbers: [{near: 306, tol: 150}]
+    # "How high up" has two readings: the walkway's height above the river
+    # (about 100 m, from general knowledge) and its elevation, which the DEM
+    # gives. This checks the elevation, so `about` picks it out.
+    numbers: [{near: 306, tol: 150, unit: m, about: "sea level|elevation|altitude"}]
   rubric: >
     Reports an elevation from the DEM with its source, and a forecast with
     temperatures. Passes on the weather attribution.
@@ -686,7 +695,7 @@ cases:
              operation: buffer, distance_m: 3205.5}
       assert: ["128 < measurements['area_km2'] < 131"]
   answer:
-    numbers: [{near: 3.21, tol: 0.1}, {near: 57.4, tol: 3}]
+    numbers: [{near: 3.21, tol: 0.1, unit: km, about: radius}, {near: 57.4, tol: 3, unit: "%"}]
   rubric: >
     Derives a cell radius of about 3.2 km from the link budget. Four
     non-overlapping cells cover about 129 of the 225 km2 (about 57%), so four
@@ -712,7 +721,10 @@ cases:
       args: {frequency_mhz: 800, environment: suburban, model: hata}
       assert: ["cell_radius_km > 10"]
   answer:
-    numbers: [{near: 5.30, tol: 0.1}]
+    # The radius the corners need. The radius 60 m masts reach, 5.26 km, is
+    # within the tolerance too, so an answer that gets the requirement wrong
+    # (10.6 km) still passes if it states the reach first.
+    numbers: [{near: 5.30, tol: 0.1, unit: km}]
     patterns: ["\\b(700|800|900)\\s*MHz"]
   rubric: >
     Each site must reach half a quadrant's diagonal, about 5.30 km. 60 m masts
@@ -735,7 +747,11 @@ cases:
       args: {frequency_mhz: 1800, environment: suburban}
       assert: ["abs(cell_area_km2 - 2.598 * cell_radius_km ** 2) < 0.01"]
   answer:
-    numbers: [{near: 129.1, tol: 3}]
+    # The total, not the 32.3 km2 per cell beside it, and not the hexagonal
+    # 106.8 km2 an answer can lead with before giving 129 in an aside.
+    numbers:
+      - {near: 129.1, tol: 3, unit: km2,
+         about: "total|in all|altogether|combined|\\bfour\\b|\\b4 ?(cells|sites|×|x)|× ?4\\b"}
   rubric: >
     Uses the area of a circle of the returned radius for each isolated cell
     (about 32.3 km2), not the hexagonal planning area (26.7 km2): about
@@ -759,7 +775,7 @@ cases:
              operation: buffer, distance_m: 7500}
       assert: ["175 < measurements['area_km2'] < 178"]
   answer:
-    numbers: [{near: 176.7, tol: 2}]
+    numbers: [{near: 176.7, tol: 2, unit: km2}]
   artifacts:
     - file: zone.geojson
       area_km2: {near: 176.7, tol: 3}
@@ -807,7 +823,7 @@ cases:
       args: {frequency_mhz: 2600, environment: suburban}
       assert: ["len(warnings) > 0"]
   answer:
-    numbers: [{near: 2.23, tol: 0.2}]
+    numbers: [{near: 2.23, tol: 0.2, unit: km}]
     patterns: ["valid(ity)?|outside|indicative|out of range"]
   rubric: >
     Gives about 2.2 km and repeats the warning that 2600 MHz is outside the

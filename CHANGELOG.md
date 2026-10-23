@@ -30,6 +30,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The evals' answer check scores each expected number against the answer's
+  headline figure, not against every number in the text. The headline is the
+  first figure in the expected unit that the answer puts in bold, or, with none
+  in bold, the first figure in that unit. Operands of a multiplication or
+  division are skipped, and an optional `about` pattern tells a total from the
+  per-cell figure beside it. Any number within tolerance used to pass, so an
+  answer to `telecom-cell-area-sum-007` that led with 106.8 km² (four hexagons)
+  and gave 128.7 km² in an aside passed, and so did a height of 100 m above a
+  river, on its "330 ft", against an elevation of 306 ± 150 m. Every `numbers`
+  entry in `evals/prompts.yaml` now names its unit.
 - The default `tools/list` is about 16% smaller (47.8k to 40.0k characters).
   Tool descriptions no longer carry docstring indentation, and the `meta`
   definition repeated in every output schema is reduced to a bare object; the
