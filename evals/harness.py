@@ -10,12 +10,13 @@ running the harness answers it.
 Every run gets a fresh working directory and HOME, and a whitelisted
 environment: only the variables in ``PASSTHROUGH`` and ``PROVIDER_KEYS``
 reach the harness, so no ambient credential in the calling shell is used by
-accident. Both directories are made under the work root (``--work-root``).
-Keep it outside your home folder, because Claude Code also reads the .claude/
-folder and CLAUDE.md of every directory above its working directory. And give
-it a name that says nothing about the tools, because Claude Code shows the
-model its working directory: on one case, a folder named geospatial-evals
-changed whether the model used them (see :data:`HINT_WORDS`).
+accident. Both directories are made under the work root (``--work-root``,
+default ~/.cache/agent-runs). Keep it outside your home folder, because Claude
+Code also reads the .claude/ folder and CLAUDE.md of every directory above its
+working directory. And give it a name that says nothing about the tools,
+because Claude Code shows the model its working directory: on one case, a
+folder named geospatial-evals changed whether the model used them (see
+:data:`HINT_WORDS`).
 
 Tool calls come from the server's own trace (``GEO_TRACE_FILE``), identical
 for every harness; the transcript supplies the final answer, the harness's
@@ -104,12 +105,21 @@ WITH_SERVER = ("mcp", "mcp-only")
 SERVER_MARKERS = ("geospatial_mcp", "geospatial-mcp", "mcp-geospatial")
 
 #: Where each run's working directory and HOME are made, unless --work-root or
-#: GEO_EVALS_WORK_ROOT says otherwise. Not under /tmp: Codex refuses to install
-#: its helper binaries there. It is inside the home folder, which a harness can
-#: see from below (see :func:`inherited_agent_config`), and its name carries
-#: "geospatial" and "evals", which the model sees (see :func:`work_root_hint_words`).
-#: It stays the default so that new runs compare with the ones recorded under it.
-DEFAULT_WORK_ROOT = Path.home() / ".cache" / "geospatial-evals"
+#: GEO_EVALS_WORK_ROOT says otherwise. Each run works in a fresh run-XXXXXXXX/work
+#: below it. Not under /tmp: Codex refuses to install its helper binaries there.
+#:
+#: The name says nothing about the server, because the model sees its working
+#: directory. Until October 2026 the default was ~/.cache/geospatial-evals, and
+#: on telecom-cell-area-sum-007 (Sonnet 5.5 in Claude Code) runs under a folder
+#: named geospatial-evals called rf_link_budget in 6 of 11 runs, and runs under
+#: neutral folders in 0 of 20 (see :data:`HINT_WORDS`). A runner whose default
+#: hints at the tools measures the hint. To compare with runs recorded under the
+#: old folder, pass --work-root ~/.cache/geospatial-evals.
+#:
+#: It is still inside the home folder, which Claude Code reads from below (see
+#: :func:`inherited_agent_config`), so the harness warns when ~/.claude exists;
+#: a work root outside it, such as /Users/Shared/agent-runs, avoids that too.
+DEFAULT_WORK_ROOT = Path.home() / ".cache" / "agent-runs"
 
 #: The variable that moves the work root without a command-line flag.
 WORK_ROOT_ENV = "GEO_EVALS_WORK_ROOT"
@@ -282,19 +292,15 @@ def warn_about_hint_words(work_root: Path) -> list[str]:
     words = work_root_hint_words(work_root)
     if words:
         listed = ", ".join(f'"{word}"' for word in words)
-        if work_root.expanduser().absolute() == DEFAULT_WORK_ROOT.absolute():
-            default = "This is the default work root."
-        else:
-            default = f"The default work root, {DEFAULT_WORK_ROOT}, has the hint too."
         print(
             f"warning: the work root {work_root} contains {listed}, which could tell the model "
             "what is being tested.\n"
             "Claude Code shows the model its working directory. On one case with Sonnet 5.5 "
             "(October 2026), runs under /Users/Shared/geospatial-evals used the expected tool "
             "in 6 of 11 runs, and runs under neutral folders in 0 of 20.\n"
-            f"{default} It stays the default so that new runs compare with those recorded under it. "
-            f"To measure without the hint, use --work-root or {WORK_ROOT_ENV} with a neutral "
-            f"name, e.g. {NEUTRAL_WORK_ROOT_EXAMPLE}.",
+            f"To measure without the hint, leave out --work-root and {WORK_ROOT_ENV} for the "
+            f"neutral default, {DEFAULT_WORK_ROOT}, or give a neutral name, "
+            f"e.g. {NEUTRAL_WORK_ROOT_EXAMPLE}.",
             file=sys.stderr,
         )
     return words

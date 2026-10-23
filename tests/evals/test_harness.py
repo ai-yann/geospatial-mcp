@@ -290,10 +290,11 @@ class TestWorkRoot:
     ~/.cache/geospatial-evals and listed the operator's own skills and agents.
     """
 
-    def test_the_default_is_unchanged(self, monkeypatch):
+    def test_the_default_has_a_neutral_name(self, monkeypatch):
+        """It was ~/.cache/geospatial-evals until October 2026."""
         monkeypatch.delenv(harness.WORK_ROOT_ENV, raising=False)
         args = harness.build_parser().parse_args(["--harness", "codex"])
-        assert args.work_root == Path.home() / ".cache" / "geospatial-evals"
+        assert args.work_root == Path.home() / ".cache" / "agent-runs"
 
     def test_the_environment_variable_moves_it(self, monkeypatch, tmp_path):
         monkeypatch.setenv(harness.WORK_ROOT_ENV, str(tmp_path / "shared"))
@@ -389,8 +390,9 @@ class TestWorkRootName:
     def test_a_neutral_path_is_not_flagged(self, path):
         assert harness.work_root_hint_words(Path(path)) == []
 
-    def test_the_default_carries_the_hint(self):
-        assert "geospatial" in harness.work_root_hint_words(harness.DEFAULT_WORK_ROOT)
+    def test_the_old_default_carried_the_hint(self):
+        old = Path.home() / ".cache" / "geospatial-evals"
+        assert "geospatial" in harness.work_root_hint_words(old)
 
     def test_the_recommended_example_is_neutral(self):
         assert harness.work_root_hint_words(Path(harness.NEUTRAL_WORK_ROOT_EXAMPLE)) == []
@@ -414,12 +416,14 @@ class TestWorkRootName:
         assert "--work-root" in err
         assert harness.WORK_ROOT_ENV in err
         assert harness.NEUTRAL_WORK_ROOT_EXAMPLE in err
-        # It says the default has the hint too, rather than only blaming the flag.
+        # It points at the neutral default as the way out.
         assert str(harness.DEFAULT_WORK_ROOT) in err
 
-    def test_the_default_is_warned_about_as_the_default(self, capsys):
-        harness.warn_about_hint_words(harness.DEFAULT_WORK_ROOT)
-        assert "This is the default work root." in capsys.readouterr().err
+    def test_the_default_is_not_warned_about(self, capsys):
+        # Under a neutral home folder: the real one's path is not this test's to choose.
+        default = Path("/Users/someone") / harness.DEFAULT_WORK_ROOT.relative_to(Path.home())
+        assert harness.warn_about_hint_words(default) == []
+        assert capsys.readouterr().err == ""
 
     def test_a_neutral_work_root_is_not_warned_about(self, capsys):
         assert harness.warn_about_hint_words(Path("/Users/Shared/agent-runs")) == []

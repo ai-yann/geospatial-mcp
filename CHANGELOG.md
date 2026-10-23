@@ -23,12 +23,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/Users/Shared/geospatial-evals` called `rf_link_budget` and passed in 6 of 11
   runs, and runs under neutral folders in 0 of 20. That is one case and one
   model, so how far the effect reaches is not known. `evals/README.md` now
-  recommends a neutral work root such as `/Users/Shared/agent-runs`. The
-  default, `~/.cache/geospatial-evals`, carries the hint but is unchanged, so
-  that new runs compare with the Claude Code runs recorded under it in
-  September 2026, whose tool use the hint may have inflated.
+  recommends a neutral work root such as `/Users/Shared/agent-runs`.
 
 ### Changed
+
+- The eval harness's default work root is `~/.cache/agent-runs`, a name that
+  says nothing about the server. It was `~/.cache/geospatial-evals`, the
+  hinting name above; every run recorded in September 2026 worked under it,
+  so their tool use may be inflated. To compare with them, pass
+  `--work-root ~/.cache/geospatial-evals`.
 
 - The evals' answer check scores each expected number against the answer's
   headline figure, not against every number in the text. The headline is the
