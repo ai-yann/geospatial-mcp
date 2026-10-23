@@ -15,7 +15,8 @@ from answers import UNITS, check_answer, check_artifacts, headline, numbers_in
 
 EVALS = Path(__file__).resolve().parents[2] / "evals"
 LIBRARY = {
-    case["id"]: case for case in yaml.safe_load((EVALS / "prompts.yaml").read_text(encoding="utf-8"))["cases"]
+    case["id"]: case
+    for case in yaml.safe_load((EVALS / "prompts.yaml").read_text(encoding="utf-8"))["cases"]
 }
 
 #: Real answers to telecom-cell-area-sum-007 (Qwen3.8-27B in OpenCode, 17 Oct 2026). The first
