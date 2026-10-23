@@ -169,6 +169,17 @@ class TestHeadline:
         assert headline(text, {"unit": unit}) == value
 
     @pytest.mark.parametrize(
+        ("text", "value"),
+        [
+            # Qwen 3.8, 23 Oct: the same height in two units, not a division
+            ("The trailhead sits at **342 m / 1,122 ft** above sea level.", 342),
+            ("elevation 1,122 ft / 342 m above sea level", 342),
+        ],
+    )
+    def test_a_slash_between_two_units_is_not_working(self, text, value):
+        assert headline(text, {"unit": "m", "about": "sea level|elevation|altitude"}) == value
+
+    @pytest.mark.parametrize(
         ("text", "unit", "value"),
         [
             ("wind 21 km/h, radius 3.21 km", "km", 3.21),

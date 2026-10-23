@@ -60,6 +60,11 @@ _FIGURE = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?")
 #: the 26.7 in four times 26.7 km², the 7.5 in "7.5 km / √2", either 7.5 in 7.5 by 7.5 km.
 _OPERATOR_BEFORE = re.compile(r"(?:[×·÷/]|\bx)\s*$")
 _OPERATOR_AFTER = re.compile(r"\s*(?:[×·÷/]|x\b)")
+#: ...except a slash between two figures that each carry a unit, which gives the same quantity twice
+#: ("342 m / 1,122 ft", "5 km / 3.1 mi"), not a division.
+_UNIT_WORD = r"(?:km²|km2|km|m²|m|ft|feet|mi|miles?|metres?|meters?|%|°[CF]?)"
+_ALSO_BEFORE = re.compile(r"\d[\d,.]*\s*" + _UNIT_WORD + r"\s*/\s*$")
+_ALSO_AFTER = re.compile(r"\s*/\s*\d[\d,.]*\s*" + _UNIT_WORD + r"(?!\w)")
 _BOLD = "**"
 #: Bold and spacing as models write them in LaTeX, as Codex sometimes does.
 _LATEX = (
@@ -141,7 +146,13 @@ def _figures(line: str, unit_after: re.Pattern[str] | None) -> list[tuple[int, i
             if not unit:
                 continue
             end = unit.end()
-        if _OPERATOR_BEFORE.search(line, 0, match.start()) or _OPERATOR_AFTER.match(line, end):
+        before = _OPERATOR_BEFORE.search(line, 0, match.start()) and not _ALSO_BEFORE.search(
+            line, 0, match.start()
+        )
+        after = _OPERATOR_AFTER.match(line, end) and not (
+            unit_after and _ALSO_AFTER.match(line, end)
+        )
+        if before or after:
             continue
         found.append((match.start(), end, float(match.group())))
     return found
