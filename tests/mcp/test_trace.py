@@ -140,14 +140,14 @@ class TestResultPreview:
         assert "inputs" not in preview
         assert "meta" not in preview
 
-    async def test_the_first_warning_is_carried_whole(self, tmp_path):
-        """The validity warning used to end '(1500-2000); tr'. The advice is the point."""
+    async def test_frequency_recovery_is_carried_as_an_error(self, tmp_path):
+        """An invalid model must not leave a plausible radius in the call pane."""
         record = await self._record(
             tmp_path, "rf_link_budget", {"frequency_mhz": 2600, "environment": "suburban"}
         )
-        warning = record["preview"]["warning"]
-        assert warning.startswith("frequency_mhz=2600 is outside the published validity range")
-        assert warning.endswith("(1500-2000); treat the result as indicative only.")
+        assert record["ok"] is False
+        assert 'model="free_space"' in record["error"]
+        assert "preview" not in record
 
     async def test_the_first_note_is_carried_whole(self, tmp_path):
         record = await self._record(tmp_path, "coord_convert", {"location": "30SUF6542755114"})

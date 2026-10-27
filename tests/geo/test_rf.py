@@ -75,11 +75,41 @@ class TestLinkBudget:
         assert budget.cell_area_km2 == pytest.approx(3 * math.sqrt(3) / 2 * r**2, rel=1e-3)
         assert budget.cell_area_km2 < math.pi * r**2
 
-    def test_out_of_range_parameters_are_reported(self):
+    def test_out_of_range_frequency_teaches_a_valid_model(self):
         """COST231-Hata is only valid from 1500-2000 MHz."""
-        budget = rf.link_budget(frequency_mhz=900, model="cost231_hata")
-        assert budget.warnings
-        assert any("validity range" in w for w in budget.warnings)
+        with pytest.raises(GeoInputError, match='model="hata"'):
+            rf.link_budget(frequency_mhz=900, model="cost231_hata")
+
+    def test_microwave_frequency_teaches_free_space_and_clearance(self):
+        with pytest.raises(GeoInputError) as exc:
+            rf.link_budget(frequency_mhz=5800)
+        message = str(exc.value)
+        assert 'model="free_space"' in message
+        assert "distance_km" in message
+        assert "terrain_profile" in message
+
+    def test_other_empirical_parameters_still_warn(self):
+        budget = rf.link_budget(frequency_mhz=1800, tx_height_m=10)
+        assert any("tx_height_m" in w for w in budget.warnings)
+
+    def test_point_to_point_power_budget(self):
+        budget = rf.link_budget(frequency_mhz=5800, model="free_space", distance_km=5.28)
+        assert budget.path_loss_db == pytest.approx(122.16, abs=0.02)
+        assert budget.received_power_dbm == pytest.approx(-67.16, abs=0.02)
+        assert budget.power_margin_db == pytest.approx(37.84, abs=0.02)
+        assert budget.fade_margin_db == pytest.approx(24.84, abs=0.02)
+        assert budget.closes_on_power is True
+
+    def test_negative_fade_margin_does_not_close(self):
+        budget = rf.link_budget(
+            frequency_mhz=5800,
+            model="free_space",
+            distance_km=5.28,
+            tx_power_dbm=0,
+            tx_gain_dbi=0,
+        )
+        assert budget.fade_margin_db is not None and budget.fade_margin_db < 0
+        assert budget.closes_on_power is False
 
     def test_in_range_parameters_are_silent(self):
         budget = rf.link_budget(frequency_mhz=1800, model="cost231_hata", tx_height_m=45)

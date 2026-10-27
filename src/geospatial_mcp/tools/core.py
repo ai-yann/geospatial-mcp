@@ -11,6 +11,7 @@ accuracy depends more on these paragraphs than on anything else in the package.
 # annotations cannot be resolved from a function-local scope -- the SDK
 # raises InvalidSignature. Eager evaluation resolves them correctly.
 
+import math
 from datetime import UTC, date, datetime
 from typing import Annotated, Any, Literal
 
@@ -32,6 +33,7 @@ from ..geo.geometry import (
     repair,
     simplify_geometry,
 )
+from ..geo.line_of_sight import ClearancePoint, path_clearance
 from ..geo.terrain import terrain_statistics
 from ..models import GeoModel, ResponseMeta
 from ._shared import (
@@ -1229,8 +1231,12 @@ def _register_terrain(mcp: MCPServer) -> None:
         height above mean sea level, which is what "elevation" normally means.
         GNSS receivers report ellipsoidal height, which differs by tens of metres.
 
-        For elevation along a path rather than at one point, use terrain_profile --
-        it fetches up to 100 samples in a single request.
+        One sample does not establish a summit's highest point. For a highest
+        point near a mapped peak, compare samples around it, including positions
+        off the approach path. A 90 m grid can smooth sharp summits.
+
+        For elevation along a path rather than at one point, use terrain_profile.
+        It also computes radio clearance when antenna heights are supplied.
         """
         from ..net.providers import openmeteo
 
@@ -1258,15 +1264,52 @@ def _register_terrain(mcp: MCPServer) -> None:
 
     class ProfileSample(GeoModel):
         distance_m: float
-        latitude: float
-        longitude: float
+        latitude: float | None = Field(default=None, exclude_if=lambda v: v is None)
+        longitude: float | None = Field(default=None, exclude_if=lambda v: v is None)
         elevation_m: float | None
+
+    class SightlinePoint(GeoModel):
+        distance_m: float
+        ground_elevation_m: float
+        sightline_height_m: float
+        earth_bulge_m: float
+        clearance_m: float
+        first_fresnel_radius_m: float | None = Field(default=None, exclude_if=lambda v: v is None)
+        fresnel_clearance_fraction: float | None = Field(
+            default=None,
+            exclude_if=lambda v: v is None,
+            description="Signed clearance / first Fresnel radius. Negative means obstruction.",
+        )
+
+    class SightlineResult(GeoModel):
+        clear: bool | None = Field(description="Null means missing elevations prevent a verdict.")
+        worst_point: SightlinePoint | None
+        k_factor: float
+        origin_antenna_height_m: float
+        destination_antenna_height_m: float
+        grid_spacing_m: float
+        sample_spacing_m: float
+        sightline_height_m: list[float | None] = Field(
+            description="Curvature-adjusted sightline heights, aligned with profile samples."
+        )
+        clearance_m: list[float | None] = Field(
+            description="Sightline minus surface elevation, aligned with profile samples."
+        )
+        frequency_mhz: float | None = Field(default=None, exclude_if=lambda v: v is None)
+        required_fresnel_clearance_fraction: float | None = Field(
+            default=None, exclude_if=lambda v: v is None
+        )
+        fresnel_60_percent_clear: bool | None = None
+        worst_fresnel_point: SightlinePoint | None = Field(
+            default=None, exclude_if=lambda v: v is None
+        )
 
     class ProfileResult(GeoModel):
         total_distance_m: float
         samples: int
         statistics: dict[str, Any]
         profile: list[ProfileSample]
+        line_of_sight: SightlineResult | None = Field(default=None, exclude_if=lambda v: v is None)
         meta: ResponseMeta
 
     @mcp.tool(annotations=network())
@@ -1278,15 +1321,74 @@ def _register_terrain(mcp: MCPServer) -> None:
             Field(
                 ge=2,
                 le=100,
-                description=("Number of evenly-spaced elevation samples along the path."),
+                description=(
+                    "Elevation sample count. With antenna heights, spacing is at most 90 m "
+                    "regardless of this value, to screen the radio path at DEM grid spacing."
+                ),
             ),
         ] = 50,
+        origin_antenna_height_m: Annotated[
+            float | None,
+            Field(
+                ge=0,
+                allow_inf_nan=False,
+                description=(
+                    "Origin antenna height in metres above the DEM surface. Supply both heights for line of sight."
+                ),
+            ),
+        ] = None,
+        destination_antenna_height_m: Annotated[
+            float | None,
+            Field(
+                ge=0,
+                allow_inf_nan=False,
+                description=(
+                    "Destination antenna height in metres above the DEM surface. Supply both heights for line of sight."
+                ),
+            ),
+        ] = None,
+        frequency_mhz: Annotated[
+            float | None,
+            Field(
+                gt=0,
+                allow_inf_nan=False,
+                description=(
+                    "Optional radio frequency in MHz for first Fresnel and 60% clearance. Requires both heights."
+                ),
+            ),
+        ] = None,
+        k_factor: Annotated[
+            float,
+            Field(
+                gt=0,
+                allow_inf_nan=False,
+                description=(
+                    "Effective Earth radius factor for radio clearance. Default 4/3 assumes standard refraction."
+                ),
+            ),
+        ] = 4 / 3,
+        include_coordinates: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Include latitude/longitude per sample. Set false for charts or clearance to reduce context."
+                )
+            ),
+        ] = True,
     ) -> ProfileResult:
         """Get the terrain elevation profile along a path between two points.
 
         Samples the ground along a true geodesic and returns the full profile plus
-        statistics: minimum, maximum, relief, total ascent and descent. All samples
-        come from one batched request rather than one call per point.
+        statistics: minimum, maximum, relief, total ascent and descent. Elevations
+        are fetched in batches of up to 100 coordinates.
+
+        For radio line of sight, supply origin_antenna_height_m and
+        destination_antenna_height_m. The line_of_sight block gives the clearance
+        verdict and worst point, with Earth curvature (k_factor, default 4/3).
+        Add frequency_mhz to test 60% first-Fresnel clearance along the whole path.
+        Radio checks use at most 90 m spacing regardless of samples. Set
+        include_coordinates=false for compact chart data. For power margin at a
+        known distance, use rf_link_budget with model="free_space" and distance_km.
 
         Use this for cycling and hiking route difficulty, pipeline and cable
         routing, drainage assessment, or sizing earthworks. For the elevation at a
@@ -1295,10 +1397,31 @@ def _register_terrain(mcp: MCPServer) -> None:
         """
         from ..net.providers import openmeteo
 
+        with_heights = (
+            origin_antenna_height_m is not None or destination_antenna_height_m is not None
+        )
+        if (with_heights or frequency_mhz is not None) and (
+            origin_antenna_height_m is None or destination_antenna_height_m is None
+        ):
+            raise GeoInputError.with_example(
+                got=(origin_antenna_height_m, destination_antenna_height_m),
+                problem="Radio clearance requires both antenna heights above the DEM surface.",
+                example="origin_antenna_height_m=10, destination_antenna_height_m=10, frequency_mhz=5800",
+            )
         start, end = resolve_pair(origin, destination, names=("origin", "destination"))
         lat1, lon1 = start.as_tuple()
         lat2, lon2 = end.as_tuple()
-        points = geodesy.densify(lat1, lon1, lat2, lon2, clamp(samples, 2, 100))
+        count = clamp(samples, 2, 100)
+        if with_heights:
+            total_m = geodesy.distance_m(lat1, lon1, lat2, lon2)
+            if total_m == 0:
+                raise GeoInputError.with_example(
+                    got=f"origin={origin!r}, destination={destination!r}",
+                    problem="A radio path requires different endpoints.",
+                    example="origin='36.6320866,-4.5051825', destination='36.6168069,-4.5610885'",
+                )
+            count = max(3, math.ceil(total_m / 90) + 1)
+        points = geodesy.densify(lat1, lon1, lat2, lon2, count)
         elevations, cached = openmeteo.elevations([(lat, lon) for lat, lon, _ in points])
         stats = terrain_statistics(elevations)
         notes = []
@@ -1307,6 +1430,71 @@ def _register_terrain(mcp: MCPServer) -> None:
                 f"{stats['gaps']} of {len(points)} samples had no elevation data and are "
                 "reported as null rather than substituted with zero."
             )
+        sightline = None
+        if origin_antenna_height_m is not None and destination_antenna_height_m is not None:
+            computed = path_clearance(
+                [d for _, _, d in points],
+                elevations,
+                origin_antenna_height_m=origin_antenna_height_m,
+                destination_antenna_height_m=destination_antenna_height_m,
+                frequency_mhz=frequency_mhz,
+                k_factor=k_factor,
+            )
+
+            def point_model(point: ClearancePoint | None) -> SightlinePoint | None:
+                if point is None:
+                    return None
+                return SightlinePoint(
+                    distance_m=round(point.distance_m, 3),
+                    ground_elevation_m=round(point.ground_elevation_m, 3),
+                    sightline_height_m=round(point.sightline_height_m, 3),
+                    earth_bulge_m=round(point.earth_bulge_m, 3),
+                    clearance_m=round(point.clearance_m, 3),
+                    first_fresnel_radius_m=(
+                        round(point.first_fresnel_radius_m, 3)
+                        if point.first_fresnel_radius_m is not None
+                        else None
+                    ),
+                    fresnel_clearance_fraction=(
+                        round(point.fresnel_clearance_fraction, 3)
+                        if point.fresnel_clearance_fraction is not None
+                        else None
+                    ),
+                )
+
+            sightline = SightlineResult(
+                clear=computed.clear,
+                worst_point=point_model(computed.worst_point),
+                k_factor=k_factor,
+                origin_antenna_height_m=origin_antenna_height_m,
+                destination_antenna_height_m=destination_antenna_height_m,
+                grid_spacing_m=90,
+                sample_spacing_m=round(points[-1][2] / (count - 1), 2),
+                sightline_height_m=[
+                    round(v, 3) if v is not None else None for v in computed.sightline_height_m
+                ],
+                clearance_m=[round(v, 3) if v is not None else None for v in computed.clearance_m],
+                frequency_mhz=frequency_mhz,
+                required_fresnel_clearance_fraction=0.6 if frequency_mhz is not None else None,
+                fresnel_60_percent_clear=computed.fresnel_60_percent_clear,
+                worst_fresnel_point=point_model(computed.worst_fresnel_point),
+            )
+            notes.extend(
+                [
+                    "Copernicus GLO-90 is a digital surface model including buildings, infrastructure "
+                    "and vegetation canopy. Antenna heights are added to the endpoint DEM surfaces, "
+                    "which can differ from surveyed bare ground.",
+                    f"DEM grid spacing is about 90 m. Sample spacing is {sightline.sample_spacing_m:g} m. "
+                    "Sub-grid obstacles and sharp summits can be missed. Published absolute vertical "
+                    "accuracy is <4 m at 90% linear error, not a bound on any individual sample.",
+                    "Clearance depends on endpoint locations, antenna heights, the sampled DEM and "
+                    "the assumed k-factor. No diffraction loss or link availability is computed.",
+                ]
+            )
+            if stats.get("gaps"):
+                notes.append(
+                    "Missing elevations cannot establish a clear path. A known obstruction still establishes blockage."
+                )
         return ProfileResult(
             total_distance_m=round(points[-1][2], 2),
             samples=len(points),
@@ -1314,12 +1502,13 @@ def _register_terrain(mcp: MCPServer) -> None:
             profile=[
                 ProfileSample(
                     distance_m=round(distance, 1),
-                    latitude=round(lat, 6),
-                    longitude=round(lon, 6),
+                    latitude=round(lat, 6) if include_coordinates else None,
+                    longitude=round(lon, 6) if include_coordinates else None,
                     elevation_m=elevation,
                 )
                 for (lat, lon, distance), elevation in zip(points, elevations, strict=True)
             ],
+            line_of_sight=sightline,
             meta=meta("open-meteo-elevation", cached=cached, notes=notes, resolved=[start, end]),
         )
 

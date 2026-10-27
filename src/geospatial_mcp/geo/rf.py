@@ -10,10 +10,9 @@ and :func:`model_warnings` reports when a caller has strayed outside it --
 because an empirical model used out of range returns a confident number that
 happens to be meaningless, and nothing else in the stack will catch that.
 
-These are statistical models over an idealised environment. They answer "how
-far does this radio reach in terrain of this character?", never "does this
-specific link clear that specific ridge?" -- which needs a terrain profile and
-a diffraction model this package does not provide.
+Empirical models describe an idealised environment. A fixed-distance budget
+answers the power side of a proposed link. Terrain clearance is computed
+separately in geo.line_of_sight, and diffraction loss is not predicted.
 
 References:
   ITU-R P.525, "Calculation of free-space attenuation".
@@ -82,10 +81,10 @@ def _require_positive_frequency(frequency_mhz: float) -> None:
     ``ValueError: math domain error``, which tells the caller nothing about
     which argument was wrong or what a good value looks like.
     """
-    if frequency_mhz <= 0:
+    if not math.isfinite(frequency_mhz) or frequency_mhz <= 0:
         raise GeoInputError.with_example(
             got=frequency_mhz,
-            problem="Frequency must be positive.",
+            problem="Frequency must be positive and finite.",
             example="1800  (LTE band 3)",
         )
 
@@ -262,11 +261,45 @@ def model_warnings(
     for name, (low, high) in ranges.items():
         value = supplied[name]
         if not low <= value <= high:
+            recovery = ""
+            if name == "frequency_mhz":
+                alternative = _frequency_model(frequency_mhz)
+                recovery = (
+                    f' Use model="{alternative}" at this frequency.'
+                    ' For a fixed point-to-point link use model="free_space" with distance_km.'
+                )
             warnings.append(
                 f"{name}={value:g} is outside the published validity range of the "
-                f"{model} model ({low:g}-{high:g}); treat the result as indicative only."
+                f"{model} model ({low:g}-{high:g}); treat the result as indicative only.{recovery}"
             )
     return warnings
+
+
+def _frequency_model(frequency_mhz: float) -> str:
+    if 150 <= frequency_mhz <= 1500:
+        return "hata"
+    if 1500 < frequency_mhz <= 2000:
+        return "cost231_hata"
+    return "free_space"
+
+
+def _require_model_frequency(model: str, frequency_mhz: float) -> None:
+    _require_positive_frequency(frequency_mhz)
+    ranges = _VALIDITY.get(model)
+    if ranges:
+        low, high = ranges["frequency_mhz"]
+        if not low <= frequency_mhz <= high:
+            alternative = _frequency_model(frequency_mhz)
+            raise GeoInputError.with_example(
+                got=f"frequency_mhz={frequency_mhz:g}, model={model!r}",
+                problem=(
+                    f"frequency_mhz is outside the {model} validity range ({low:g}-{high:g} MHz). "
+                    f'Use model="{alternative}" at this frequency. For a fixed point-to-point '
+                    'link use model="free_space" with distance_km for a power-only margin, '
+                    "and terrain_profile with antenna heights for clearance."
+                ),
+                example=f'frequency_mhz={frequency_mhz:g}, model="{alternative}"',
+            )
 
 
 def cell_radius_km(
@@ -321,6 +354,12 @@ class LinkBudget:
     cell_area_km2: float
     model: str
     warnings: list[str] = field(default_factory=list)
+    distance_km: float | None = None
+    path_loss_db: float | None = None
+    received_power_dbm: float | None = None
+    power_margin_db: float | None = None
+    fade_margin_db: float | None = None
+    closes_on_power: bool | None = None
 
 
 def link_budget(
@@ -336,6 +375,7 @@ def link_budget(
     environment: str = "urban",
     shadow_margin_db: float | None = None,
     model: str = "cost231_hata",
+    distance_km: float | None = None,
 ) -> LinkBudget:
     """Compute EIRP, maximum allowable path loss and the resulting cell radius.
 
@@ -347,6 +387,13 @@ def link_budget(
             got=environment,
             problem=f"Unknown environment. Valid: {', '.join(ENVIRONMENTS)}.",
             example="suburban",
+        )
+    _require_model_frequency(model, frequency_mhz)
+    if distance_km is not None and (not math.isfinite(distance_km) or distance_km <= 0):
+        raise GeoInputError.with_example(
+            got=distance_km,
+            problem="distance_km must be finite and positive.",
+            example="5.28",
         )
     margin = ENVIRONMENTS[environment][1] if shadow_margin_db is None else shadow_margin_db
     eirp = tx_power_dbm + tx_gain_dbi - losses_db
@@ -364,6 +411,35 @@ def link_budget(
     # what each site serves when cells tile a plan without gaps. It is not the
     # circle's area (pi r^2), which double-counts wherever neighbours overlap.
     area = 2.598 * radius**2
+    warnings = model_warnings(
+        model,
+        frequency_mhz=frequency_mhz,
+        tx_height_m=tx_height_m,
+        rx_height_m=rx_height_m,
+        distance_km=radius,
+    )
+    loss = received = power_margin = fade_margin = None
+    if distance_km is not None:
+        loss = path_loss_db(
+            model, frequency_mhz, distance_km, tx_height_m, rx_height_m, environment
+        )
+        received = eirp + rx_gain_dbi - loss
+        power_margin = received - rx_sensitivity_dbm
+        fade_margin = power_margin - margin
+        warnings = list(
+            dict.fromkeys(
+                [
+                    *warnings,
+                    *model_warnings(
+                        model,
+                        frequency_mhz=frequency_mhz,
+                        tx_height_m=tx_height_m,
+                        rx_height_m=rx_height_m,
+                        distance_km=distance_km,
+                    ),
+                ]
+            )
+        )
     return LinkBudget(
         eirp_dbm=eirp,
         max_allowable_path_loss_db=mapl,
@@ -371,11 +447,11 @@ def link_budget(
         cell_radius_km=radius,
         cell_area_km2=area,
         model=model,
-        warnings=model_warnings(
-            model,
-            frequency_mhz=frequency_mhz,
-            tx_height_m=tx_height_m,
-            rx_height_m=rx_height_m,
-            distance_km=radius,
-        ),
+        warnings=warnings,
+        distance_km=distance_km,
+        path_loss_db=loss,
+        received_power_dbm=received,
+        power_margin_db=power_margin,
+        fade_margin_db=fade_margin,
+        closes_on_power=fade_margin >= 0 if fade_margin is not None else None,
     )

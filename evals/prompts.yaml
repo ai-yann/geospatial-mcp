@@ -173,7 +173,7 @@ cases:
   network: false
   validate:
     - tool: rf_link_budget
-      args: {frequency_mhz: 900, environment: suburban, tx_power_dbm: 43,
+      args: {frequency_mhz: 900, model: hata, environment: suburban, tx_power_dbm: 43,
              tx_gain_dbi: 15, tx_height_m: 45}
       assert: ["cell_radius_km > 0"]
     - tool: rf_link_budget
@@ -662,13 +662,18 @@ cases:
   network: true
   validate:
     - tool: terrain_profile
-      args: {origin: "36.6320866,-4.5051825", destination: "36.6168069,-4.5610885", samples: 40}
-      assert: ["statistics['max_m'] > 600", "statistics['gaps'] == 0"]
+      args: {origin: "36.6320866,-4.5051825", destination: "36.6168069,-4.5610885",
+             origin_antenna_height_m: 10, destination_antenna_height_m: 10,
+             frequency_mhz: 5800, include_coordinates: false}
+      assert: ["statistics['max_m'] > 600", "statistics['gaps'] == 0", "line_of_sight['clear'] == False"]
+    - tool: rf_link_budget
+      args: {frequency_mhz: 5800, model: free_space, distance_km: 5.2803}
+      assert: ["closes_on_power == True", "fade_margin_db > 20"]
   answer:
     patterns: ["fresnel"]
   rubric: >
-    Samples the ground between the two ends, checks clearance of the first
-    Fresnel zone at 5.8 GHz, and names the critical point. A strong answer
+    Reports the tool's terrain obstruction and failed 60% first-Fresnel
+    clearance at 5.8 GHz, and says free-space power closes. A strong answer
     notices that the geocoded peak is not the highest point of the profile,
     so the verdict depends on exactly where the summit mast stands.
   max_turns: 8
@@ -820,12 +825,33 @@ cases:
   network: false
   validate:
     - tool: rf_link_budget
-      args: {frequency_mhz: 2600, environment: suburban}
-      assert: ["len(warnings) > 0"]
+      args: {frequency_mhz: 2600, environment: suburban, model: free_space, distance_km: 5}
+      assert: ["closes_on_power == True", "path_loss_db > 100"]
   answer:
-    numbers: [{near: 2.23, tol: 0.2, unit: km}]
-    patterns: ["valid(ity)?|outside|indicative|out of range"]
+    patterns: ["valid(ity)?|outside|out of range", "free.space"]
   rubric: >
-    Gives about 2.2 km and repeats the warning that 2600 MHz is outside the
-    COST 231-Hata model's validity range, so the figure is indicative only.
+    Explains that COST 231-Hata is invalid at 2600 MHz and follows the error's
+    free-space recovery advice. Identifies free space as an unobstructed
+    power-only bound that cannot establish a cellular coverage radius.
   max_turns: 4
+
+- id: telecom-fixed-distance-power-010
+  persona: telecom
+  axis: caveats
+  prompt: >
+    At 5.8 GHz over 5.28 km, with 43 dBm transmit power, 15 dBi transmit
+    gain, 0 dBi receive gain, 3 dB losses and -105 dBm sensitivity, does
+    the link close on power under free space with 13 dB shadow margin?
+  expect_tools: [rf_link_budget]
+  forbid_tools: [rf_towers]
+  network: false
+  validate:
+    - tool: rf_link_budget
+      args: {frequency_mhz: 5800, model: free_space, distance_km: 5.28, shadow_margin_db: 13}
+      assert: ["closes_on_power == True", "24 < fade_margin_db < 26"]
+  answer:
+    patterns: ["free.space", "margin"]
+  rubric: >
+    Reports about 122 dB path loss, -67 dBm received power and 25 dB
+    remaining margin after the separate 13 dB shadow margin. Makes power
+    closure conditional on an unobstructed path and the supplied radio settings.

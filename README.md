@@ -153,7 +153,7 @@ Eiffel Tower, Paris      a place name, geocoded for you
 | `route_isochrone` | Everywhere reachable in N minutes | ○ |
 | `route_matrix` | Travel times between many origins and destinations | ○ |
 | `terrain_elevation` | Height above sea level | ○ |
-| `terrain_profile` | Elevation along a path, ascent and descent | ○ |
+| `terrain_profile` | Elevation along a path and optional radio clearance | ○ |
 | `env_weather` | Current conditions and forecast | ○ |
 | `sun_moon` | Sunrise, twilight, golden hour, shadow length | ● |
 | `time_at_location` | Time zone, local time, next DST change | ● |
@@ -164,7 +164,7 @@ Eiffel Tower, Paris      a place name, geocoded for you
 
 | Tool | What it answers | Offline |
 |---|---|:--:|
-| `rf_link_budget` | Path-loss budget and cell radius | ● |
+| `rf_link_budget` | Cell radius or power margin at a known distance | ● |
 | `rf_towers` | Known cell towers nearby | ○ |
 
 ### `analysis` — 2 tools, opt-in (the `stats` extra)
@@ -179,6 +179,32 @@ Eiffel Tower, Paris      a place name, geocoded for you
 Link budgets are an everyday tool for mobile operators, wireless ISPs,
 utilities running SCADA telemetry and IoT fleets: how far a radio reaches for a
 given power, frequency and environment.
+
+For a fixed point-to-point link, check power and terrain clearance separately.
+For example, these `tools/call` arguments screen a 5.8 GHz link with 10 m masts:
+
+```json
+{"name":"rf_link_budget","arguments":{"frequency_mhz":5800,"model":"free_space","distance_km":5.28}}
+```
+
+```json
+{"name":"terrain_profile","arguments":{"origin":"36.6320866,-4.5051825","destination":"36.6168069,-4.5610885","origin_antenna_height_m":10,"destination_antenna_height_m":10,"frequency_mhz":5800,"include_coordinates":false}}
+```
+
+The budget returns path loss, received power, power margin before shadow fading,
+the remaining fade margin and `closes_on_power`. Free space assumes an
+unobstructed path. Empirical models reject frequencies outside their validity
+range with an example of a valid model to retry. The default cellular model
+remains COST 231-Hata at 1800 MHz.
+
+The profile's `line_of_sight` block gives geometric clearance, the worst point
+and the 60% first-Fresnel clearance check. Radio paths are sampled at no more
+than 90 m spacing, in provider batches of at most 100 coordinates, regardless
+of `samples`. `k_factor` defaults to 4/3. Antenna heights are added to the
+Copernicus GLO-90 surface, which includes buildings and vegetation. The
+response states DEM resolution and accuracy limits. No diffraction loss or
+availability prediction is computed. A missing elevation can prevent a clear
+verdict. Calls without antenna heights retain the original profile output.
 
 This is one server among many. If you are working out which to use, Sparkgeo's
 [geo-mcp-servers](https://github.com/sparkgeo/geo-mcp-servers) is a curated,

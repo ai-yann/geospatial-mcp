@@ -125,6 +125,8 @@ class TestDescriptions:
                 ("terrain_profile", "terrain_elevation"),
                 ("terrain_elevation", "terrain_profile"),
                 ("rf_link_budget", "rf_towers"),
+                ("rf_link_budget", "terrain_profile"),
+                ("terrain_profile", "rf_link_budget"),
             ]
             tools = {t.name: (t.description or "") for t in (await client.list_tools()).tools}
             for name, must_mention in expectations:

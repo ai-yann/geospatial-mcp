@@ -215,6 +215,15 @@ def _extras(data: dict[str, Any]) -> dict[str, Any]:
     warnings = data.get("warnings")
     if isinstance(warnings, list) and warnings and isinstance(warnings[0], str):
         extras["warning"] = _clip(warnings[0], _SENTENCE_LIMIT)
+    sightline = data.get("line_of_sight")
+    if isinstance(sightline, dict):
+        extras["los_clear"] = sightline.get("clear")
+        if "fresnel_60_percent_clear" in sightline:
+            extras["fresnel_60_percent_clear"] = sightline["fresnel_60_percent_clear"]
+        worst = sightline.get("worst_point")
+        if isinstance(worst, dict):
+            extras["worst_distance_m"] = worst.get("distance_m")
+            extras["worst_clearance_m"] = worst.get("clearance_m")
     meta = data.get("meta")
     if isinstance(meta, dict):
         notes = meta.get("notes")

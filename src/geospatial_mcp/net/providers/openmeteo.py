@@ -5,9 +5,9 @@ is **CC-BY 4.0 and non-commercial**. Commercial deployments must either point
 ``OPEN_METEO_BASE_URL`` at ``customer-api.open-meteo.com`` with an API key, or
 self-host.
 
-Elevation comes from the Copernicus GLO-90 DEM and accepts up to 100
-coordinates in a single request, which is what makes terrain profiles and
-line-of-sight checks one call instead of fifty.
+Elevation comes from the Copernicus GLO-90 DEM. The provider accepts up to 100
+coordinates per request. Longer profiles are split into ordered batches.
+Provider limit: https://open-meteo.com/en/docs/elevation-api
 """
 
 from __future__ import annotations
@@ -78,11 +78,17 @@ def elevations(points: Sequence[tuple[float, float]]) -> tuple[list[float | None
     """
     if not points:
         return [], False
-    if len(points) > MAX_ELEVATION_POINTS:
-        raise GeoUpstreamError(
-            f"Open-Meteo accepts at most {MAX_ELEVATION_POINTS} coordinates per "
-            f"elevation request; got {len(points)}. Reduce the sample count."
-        )
+    values: list[float | None] = []
+    all_cached = True
+    for offset in range(0, len(points), MAX_ELEVATION_POINTS):
+        batch_values, cached = _elevation_batch(points[offset : offset + MAX_ELEVATION_POINTS])
+        values.extend(batch_values)
+        all_cached = all_cached and cached
+    return values, all_cached
+
+
+def _elevation_batch(points: Sequence[tuple[float, float]]) -> tuple[list[float | None], bool]:
+    """One provider request, preserving the input coordinate order."""
     # A 100-point batch is a much heavier request than a single lookup, and the
     # public endpoint is regularly slow under load. Scale the timeout with the
     # batch size rather than failing a terrain profile on a 15s default.
@@ -101,6 +107,11 @@ def elevations(points: Sequence[tuple[float, float]]) -> tuple[list[float | None
     values = payload.get("elevation") if isinstance(payload, dict) else None
     if not isinstance(values, list):
         raise GeoUpstreamError("Open-Meteo elevation response had no 'elevation' array.")
+    if len(values) != len(points):
+        raise GeoUpstreamError(
+            f"Open-Meteo returned {len(values)} elevations for {len(points)} coordinates. "
+            "Cannot align samples with the path. Retry the same request."
+        )
     return [None if v is None else float(v) for v in values], cached
 
 
