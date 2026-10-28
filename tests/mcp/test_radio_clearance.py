@@ -145,6 +145,8 @@ class TestPowerContract:
         assert result["model"] == "cost231_hata"
         assert result["cell_radius_km"] == 3.2055
         assert result["shadow_margin_db"] == 9
+        assert result["circular_area_km2"] == pytest.approx(32.28, abs=0.02)
+        assert 4 * result["circular_area_km2"] / 225 * 100 == pytest.approx(57.4, abs=0.1)
         assert "distance_km" not in result and "closes_on_power" not in result
 
     async def test_fixed_distance_margin_is_after_the_separate_shadow_margin(self):
@@ -242,3 +244,18 @@ async def test_grid_spaced_demo_finds_the_741_m_ridge(monkeypatch):
     assert worst["distance_m"] == pytest.approx(5190.805, abs=0.01)
     assert worst["clearance_m"] == pytest.approx(-26.688, abs=0.01)
     assert worst["first_fresnel_radius_m"] == pytest.approx(2.133, abs=0.01)
+    compact = await _call(
+        "terrain_profile", {**PATH, **HEIGHTS, "frequency_mhz": 5800, "include_coordinates": False}
+    )
+    assert all("latitude" not in sample for sample in compact["profile"])
+    clearance = compact["line_of_sight"]
+    assert clearance["origin_surface_elevation_m"] == 86
+    assert clearance["destination_surface_elevation_m"] == 715
+    highest = clearance["highest_sample"]
+    assert highest["elevation_m"] == 741
+    assert highest["distance_to_destination_m"] == pytest.approx(89.495, abs=0.01)
+    assert highest["direction_from_destination"] == "ENE"
+    assert highest["bearing_from_destination_deg"] == pytest.approx(71.25, abs=0.01)
+    assert highest["longitude"] > float(PATH["destination"].split(",")[1])
+    assert worst["latitude"] == highest["latitude"]
+    assert worst["longitude"] == highest["longitude"]

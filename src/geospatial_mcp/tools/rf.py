@@ -35,6 +35,9 @@ def register(mcp: MCPServer) -> None:
                 "One isolated circular cell covers pi * r^2."
             )
         )
+        circular_area_km2: float = Field(
+            description="Ideal isolated circular footprint: pi * r^2, before overlap or clipping."
+        )
         model: str
         environment: str
         inputs: dict[str, Any]
@@ -124,10 +127,15 @@ def register(mcp: MCPServer) -> None:
         terrain_profile and antenna heights. Free-space power closure assumes
         an unobstructed path and does not establish a working radio link.
 
-        cell_area_km2 is the hexagonal area one site serves when cells tile a
-        network plan (2.598 * r^2), not the footprint of one isolated circular
-        cell (pi * r^2) -- about 17% smaller, so summing it undercounts the
-        coverage of sites that do not overlap.
+        Use radio hardware values supplied by the caller. When hardware is
+        unspecified, omit power, gain, loss and sensitivity inputs to use the
+        documented defaults, and state those assumptions with the result.
+        Inventing a radio specification changes the question being answered.
+
+        circular_area_km2 is the ideal isolated circular footprint (pi * r^2).
+        For multiple coverage circles, subtract overlaps and clip to the target
+        area. cell_area_km2 retains the smaller hexagonal tiling area (2.598 * r^2)
+        used in cellular network plans.
 
         Rejects an empirical model outside its frequency range and names a valid
         model to retry. Other out-of-range empirical parameters carry warnings.
@@ -159,6 +167,7 @@ def register(mcp: MCPServer) -> None:
             max_path_loss_with_margin_db=round(budget.max_path_loss_with_margin_db, 2),
             cell_radius_km=round(budget.cell_radius_km, 4),
             cell_area_km2=round(budget.cell_area_km2, 4),
+            circular_area_km2=round(budget.circular_area_km2, 4),
             model=model,
             environment=environment,
             inputs={

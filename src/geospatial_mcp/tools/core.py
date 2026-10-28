@@ -703,7 +703,10 @@ def _register_places(mcp: MCPServer) -> None:
             Field(
                 ge=3,
                 le=18,
-                description=("Detail level: 18 building, 16 street, 10 city, 5 state, 3 country."),
+                description=(
+                    "18 building or venue (default for what's here), 16 street, "
+                    "10 city, 5 state, 3 country. Lower zoom intentionally coarsens the answer."
+                ),
             ),
         ] = 18,
     ) -> ReverseResult:
@@ -713,6 +716,9 @@ def _register_places(mcp: MCPServer) -> None:
         a delivery destination, or identifying the administrative area a position
         falls in (lower the zoom to get city, region or country instead of a
         street address).
+
+        For what is at a position, keep the default zoom=18 to identify a building
+        or venue. zoom=16 identifies a street and cannot settle that question.
         """
         from ..net.providers import nominatim
 
@@ -726,7 +732,17 @@ def _register_places(mcp: MCPServer) -> None:
             address=raw["address"],
             category=raw.get("category"),
             type=raw.get("type"),
-            meta=meta("nominatim", cached=cached, resolved=[loc]),
+            meta=meta(
+                "nominatim",
+                cached=cached,
+                resolved=[loc],
+                notes=[
+                    f"zoom={zoom} intentionally reports a coarser place. "
+                    "Use place_reverse with zoom=18 for the building or venue at this position."
+                ]
+                if zoom < 18
+                else [],
+            ),
         )
 
     class Place(GeoModel):
@@ -1268,8 +1284,19 @@ def _register_terrain(mcp: MCPServer) -> None:
         longitude: float | None = Field(default=None, exclude_if=lambda v: v is None)
         elevation_m: float | None
 
+    class LocatedProfileSample(ProfileSample):
+        latitude: float
+        longitude: float
+        elevation_m: float
+        distance_to_destination_m: float
+        bearing_from_destination_deg: float | None = None
+        direction_from_destination: str | None = None
+
     class SightlinePoint(GeoModel):
         distance_m: float
+        latitude: float
+        longitude: float
+        distance_to_destination_m: float
         ground_elevation_m: float
         sightline_height_m: float
         earth_bulge_m: float
@@ -1287,6 +1314,13 @@ def _register_terrain(mcp: MCPServer) -> None:
         k_factor: float
         origin_antenna_height_m: float
         destination_antenna_height_m: float
+        origin_surface_elevation_m: float | None
+        destination_surface_elevation_m: float | None
+        highest_sample: LocatedProfileSample | None = Field(
+            default=None,
+            exclude_if=lambda v: v is None,
+            description="Highest sample on this path, with its position and offset from the destination.",
+        )
         grid_spacing_m: float
         sample_spacing_m: float
         sightline_height_m: list[float | None] = Field(
@@ -1390,6 +1424,14 @@ def _register_terrain(mcp: MCPServer) -> None:
         include_coordinates=false for compact chart data. For power margin at a
         known distance, use rf_link_budget with model="free_space" and distance_km.
 
+        Radio feasibility combines power closure and terrain clearance. Report
+        both checks. A clearance verdict is conditional on the selected endpoints,
+        antenna heights, sampled surface model and k-factor. Include the accuracy
+        limits from meta.notes when explaining it. highest_sample gives the
+        highest point sampled on this path, including its offset from the
+        destination. For a highest point around a mapped peak, compare off-path
+        neighbours with terrain_elevation as well.
+
         Use this for cycling and hiking route difficulty, pipeline and cable
         routing, drainage assessment, or sizing earthworks. For the elevation at a
         single point, or at a scattered set of them, use terrain_elevation -- this
@@ -1441,11 +1483,34 @@ def _register_terrain(mcp: MCPServer) -> None:
                 k_factor=k_factor,
             )
 
+            def located_sample(index: int) -> LocatedProfileSample:
+                lat, lon, distance = points[index]
+                elevation = elevations[index]
+                assert elevation is not None
+                remaining = points[-1][2] - distance
+                bearing = geodesy.bearing_deg(lat2, lon2, lat, lon) if remaining > 0 else None
+                return LocatedProfileSample(
+                    distance_m=round(distance, 3),
+                    latitude=round(lat, 6),
+                    longitude=round(lon, 6),
+                    elevation_m=elevation,
+                    distance_to_destination_m=round(remaining, 3),
+                    bearing_from_destination_deg=round(bearing, 2) if bearing is not None else None,
+                    direction_from_destination=geodesy.compass_point(bearing)
+                    if bearing is not None
+                    else None,
+                )
+
             def point_model(point: ClearancePoint | None) -> SightlinePoint | None:
                 if point is None:
                     return None
+                index = next(i for i, (_, _, d) in enumerate(points) if d == point.distance_m)
+                location = located_sample(index)
                 return SightlinePoint(
                     distance_m=round(point.distance_m, 3),
+                    latitude=location.latitude,
+                    longitude=location.longitude,
+                    distance_to_destination_m=location.distance_to_destination_m,
                     ground_elevation_m=round(point.ground_elevation_m, 3),
                     sightline_height_m=round(point.sightline_height_m, 3),
                     earth_bulge_m=round(point.earth_bulge_m, 3),
@@ -1462,12 +1527,17 @@ def _register_terrain(mcp: MCPServer) -> None:
                     ),
                 )
 
+            valid_samples = [(i, e) for i, e in enumerate(elevations) if e is not None]
+            highest = max(valid_samples, key=lambda item: item[1], default=None)
             sightline = SightlineResult(
                 clear=computed.clear,
                 worst_point=point_model(computed.worst_point),
                 k_factor=k_factor,
                 origin_antenna_height_m=origin_antenna_height_m,
                 destination_antenna_height_m=destination_antenna_height_m,
+                origin_surface_elevation_m=elevations[0],
+                destination_surface_elevation_m=elevations[-1],
+                highest_sample=located_sample(highest[0]) if highest is not None else None,
                 grid_spacing_m=90,
                 sample_spacing_m=round(points[-1][2] / (count - 1), 2),
                 sightline_height_m=[
@@ -1489,6 +1559,9 @@ def _register_terrain(mcp: MCPServer) -> None:
                     "accuracy is <4 m at 90% linear error, not a bound on any individual sample.",
                     "Clearance depends on endpoint locations, antenna heights, the sampled DEM and "
                     "the assumed k-factor. No diffraction loss or link availability is computed.",
+                    "highest_sample is a sample maximum along this path. It does not establish "
+                    "the highest ground in the surrounding area. Compare off-path neighbours "
+                    "with terrain_elevation for a summit question.",
                 ]
             )
             if stats.get("gaps"):

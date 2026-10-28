@@ -73,7 +73,8 @@ class TestLinkBudget:
         budget = rf.link_budget(frequency_mhz=1800, environment="suburban")
         r = budget.cell_radius_km
         assert budget.cell_area_km2 == pytest.approx(3 * math.sqrt(3) / 2 * r**2, rel=1e-3)
-        assert budget.cell_area_km2 < math.pi * r**2
+        assert budget.circular_area_km2 == pytest.approx(math.pi * r**2)
+        assert budget.cell_area_km2 < budget.circular_area_km2
 
     def test_out_of_range_frequency_teaches_a_valid_model(self):
         """COST231-Hata is only valid from 1500-2000 MHz."""

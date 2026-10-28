@@ -352,6 +352,7 @@ class LinkBudget:
     max_path_loss_with_margin_db: float
     cell_radius_km: float
     cell_area_km2: float
+    circular_area_km2: float
     model: str
     warnings: list[str] = field(default_factory=list)
     distance_km: float | None = None
@@ -446,6 +447,7 @@ def link_budget(
         max_path_loss_with_margin_db=mapl_with_margin,
         cell_radius_km=radius,
         cell_area_km2=area,
+        circular_area_km2=math.pi * radius**2,
         model=model,
         warnings=warnings,
         distance_km=distance_km,
